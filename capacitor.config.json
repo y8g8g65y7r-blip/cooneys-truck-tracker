@@ -1,0 +1,13 @@
+{
+  "appId": "com.cooneystrucking.trucktracker",
+  "appName": "Cooney's Truck Tracker",
+  "webDir": "www",
+  "android": {
+    "useLegacyBridge": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

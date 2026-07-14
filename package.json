@@ -1,0 +1,28 @@
+{
+  "name": "truck-tracker",
+  "version": "1.0.0",
+  "description": "",
+  "main": "config.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/y8g8g65y7r-blip/cooneys-truck-tracker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/y8g8g65y7r-blip/cooneys-truck-tracker/issues"
+  },
+  "homepage": "https://github.com/y8g8g65y7r-blip/cooneys-truck-tracker#readme",
+  "dependencies": {
+    "@capacitor-community/background-geolocation": "^1.2.26",
+    "@capacitor/android": "^7.6.8",
+    "@capacitor/cli": "^7.6.8",
+    "@capacitor/core": "^7.6.8",
+    "@capacitor/ios": "^7.6.8"
+  }
+}

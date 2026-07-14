@@ -210,9 +210,12 @@
   <script src="config.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
+    const BackgroundGeolocation = isNative ? window.Capacitor.Plugins.BackgroundGeolocation : null
     let currentUser = null
     let tracking = false
     let watchId = null
+    let bgWatcherId = null
     let sendInterval = null
     let wakeLock = null
     let lastPosition = null
@@ -283,6 +286,53 @@
     }
 
     async function startTracking() {
+      // Native app (installed on the phone): real background tracking via the
+      // OS location service, keeps running with the screen off / app closed.
+      if (isNative && BackgroundGeolocation) {
+        try {
+          bgWatcherId = await BackgroundGeolocation.addWatcher(
+            {
+              backgroundTitle: 'Tracking your truck',
+              backgroundMessage: "Cooney's Truck Tracker is running. Tap to open.",
+              requestPermissions: true,
+              stale: false,
+              // Metres between updates, not a fixed timer — fires roughly every
+              // 3-10s at normal driving speeds, and goes quiet automatically
+              // while parked instead of draining the battery for no reason.
+              distanceFilter: 40
+            },
+            (location, error) => {
+              if (error) {
+                if (error.code === 'NOT_AUTHORIZED') {
+                  if (confirm("This app needs location access to track your truck. Open settings now?")) {
+                    BackgroundGeolocation.openSettings()
+                  }
+                }
+                document.getElementById('statusLabel').textContent = 'GPS error'
+                return
+              }
+              if (!tracking) firstActivate()
+              sendLocation({
+                coords: {
+                  latitude: location.latitude,
+                  longitude: location.longitude,
+                  accuracy: location.accuracy,
+                  speed: location.speed,
+                  heading: location.bearing
+                }
+              })
+            }
+          )
+          tracking = true
+          document.getElementById('trackToggle').textContent = 'Pause GPS tracking'
+        } catch (e) {
+          alert('Could not start location tracking: ' + e.message)
+        }
+        return
+      }
+
+      // Browser fallback (testing on the web build): foreground-only, screen
+      // must stay on and the tab open — the wake lock keeps the screen alive.
       if (!navigator.geolocation) {
         alert('GPS is not available on this device.')
         return
@@ -317,7 +367,11 @@
       document.getElementById('statusLabel').textContent = 'Live'
     }
 
-    function stopTracking() {
+    async function stopTracking() {
+      if (isNative && BackgroundGeolocation && bgWatcherId) {
+        try { await BackgroundGeolocation.removeWatcher({ id: bgWatcherId }) } catch (e) {}
+        bgWatcherId = null
+      }
       if (watchId !== null) navigator.geolocation.clearWatch(watchId)
       if (sendInterval) clearInterval(sendInterval)
       if (wakeLock) { try { wakeLock.release() } catch(e) {} wakeLock = null }
@@ -345,7 +399,7 @@
     }
 
     async function signOut() {
-      stopTracking()
+      await stopTracking()
       await sb.auth.signOut()
       window.location.href = 'index.html'
     }
