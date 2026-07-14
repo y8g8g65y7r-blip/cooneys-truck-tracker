@@ -1,0 +1,11 @@
+{
+  "name": "Cooney's Trucking — Truck Tracker",
+  "short_name": "CT Tracker",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#15161a",
+  "theme_color": "#15161a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

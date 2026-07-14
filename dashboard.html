@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Cooney's Trucking — My Truck</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#15161a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #15161a;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-logo { font-size: 16px; font-weight: 900; color: #ff6a1a; letter-spacing: 1px; }
+    .unit-badge {
+      background: #ff6a1a;
+      color: #15161a;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 4px 9px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+    }
+    .btn-signout {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 28px 20px 40px;
+      gap: 22px;
+    }
+
+    .status-ring {
+      width: 150px;
+      height: 150px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 6px;
+      background: rgba(255,255,255,0.04);
+      border: 4px solid rgba(255,255,255,0.1);
+      transition: border-color 0.4s, box-shadow 0.4s;
+    }
+    .status-ring.active {
+      border-color: #22c55e;
+      box-shadow: 0 0 0 0 rgba(34,197,94,0.4);
+      animation: pulse-ring 2s infinite;
+    }
+    @keyframes pulse-ring {
+      0%   { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
+      70%  { box-shadow: 0 0 0 20px rgba(34,197,94,0); }
+      100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+    }
+    .status-icon { font-size: 36px; }
+    .status-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.4);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+    .status-ring.active .status-label { color: #22c55e; }
+
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 18px 20px;
+      width: 100%;
+      max-width: 400px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 800;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+    .dispatch-address {
+      font-size: 17px;
+      font-weight: 700;
+      color: #15161a;
+      margin-bottom: 6px;
+    }
+    .dispatch-notes {
+      font-size: 13px;
+      color: #6c757d;
+      margin-bottom: 4px;
+    }
+    .dispatch-empty {
+      font-size: 14px;
+      color: #9aa0a6;
+      text-align: center;
+      padding: 8px 0;
+    }
+
+    .btn-directions {
+      width: 100%;
+      max-width: 400px;
+      padding: 20px;
+      border: none;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      background: #ff6a1a;
+      color: #15161a;
+    }
+    .btn-directions:active { background: #e0590f; }
+    .btn-directions:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-complete {
+      width: 100%;
+      max-width: 400px;
+      padding: 13px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+    }
+
+    .btn-track-toggle {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.35);
+      font-size: 12px;
+      text-decoration: underline;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: rgba(255,255,255,0.35);
+      width: 100%;
+      max-width: 400px;
+      padding: 0 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-logo">COONEY'S</div>
+      <span class="unit-badge" id="unitBadge">UNIT —</span>
+    </div>
+    <button class="btn-signout" onclick="signOut()">Sign Out</button>
+  </div>
+
+  <div class="main">
+
+    <div class="status-ring" id="statusRing">
+      <div class="status-icon">📍</div>
+      <div class="status-label" id="statusLabel">Starting...</div>
+    </div>
+
+    <div class="info-row">
+      <span>Driver: <span id="infoName">—</span></span>
+      <span id="infoLastSent">—</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Current Dispatch</div>
+      <div id="dispatchBody">
+        <div class="dispatch-empty">No dispatch assigned</div>
+      </div>
+    </div>
+
+    <button class="btn-directions" id="directionsBtn" onclick="getDirections()" disabled>Get Directions</button>
+    <button class="btn-complete" id="completeBtn" onclick="markComplete()" style="display:none;">Mark Job Complete</button>
+
+    <button class="btn-track-toggle" id="trackToggle" onclick="toggleTracking()">Pause GPS tracking</button>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script>
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    let currentUser = null
+    let tracking = false
+    let watchId = null
+    let sendInterval = null
+    let wakeLock = null
+    let lastPosition = null
+    let activeDispatch = null
+
+    sb.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) { window.location.href = 'index.html'; return }
+      currentUser = session.user
+      const { data: profile } = await sb.from('profiles').select('full_name, unit_number, role').eq('id', session.user.id).single()
+      if (profile?.role === 'dispatcher') { window.location.href = 'dispatcher.html'; return }
+      document.getElementById('infoName').textContent = profile?.full_name || 'Unknown'
+      document.getElementById('unitBadge').textContent = 'UNIT ' + (profile?.unit_number || '—')
+      loadDispatch()
+      setInterval(loadDispatch, 30000)
+      startTracking()
+    })
+
+    async function loadDispatch() {
+      const { data } = await sb.from('dispatches')
+        .select('*')
+        .eq('driver_id', currentUser.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      activeDispatch = data || null
+      const body = document.getElementById('dispatchBody')
+      const dirBtn = document.getElementById('directionsBtn')
+      const completeBtn = document.getElementById('completeBtn')
+
+      if (!activeDispatch) {
+        body.innerHTML = '<div class="dispatch-empty">No dispatch assigned</div>'
+        dirBtn.disabled = true
+        completeBtn.style.display = 'none'
+        return
+      }
+
+      body.innerHTML = `
+        <div class="dispatch-address">${activeDispatch.site_address}</div>
+        ${activeDispatch.notes ? `<div class="dispatch-notes">${activeDispatch.notes}</div>` : ''}
+      `
+      dirBtn.disabled = false
+      completeBtn.style.display = 'block'
+    }
+
+    function getDirections() {
+      if (!activeDispatch) return
+      const dest = (activeDispatch.lat != null && activeDispatch.lng != null)
+        ? `${activeDispatch.lat},${activeDispatch.lng}`
+        : encodeURIComponent(activeDispatch.site_address)
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}`, '_blank')
+    }
+
+    async function markComplete() {
+      if (!activeDispatch) return
+      const completeBtn = document.getElementById('completeBtn')
+      completeBtn.disabled = true
+      completeBtn.textContent = 'Marking complete...'
+      await sb.from('dispatches').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', activeDispatch.id)
+      completeBtn.disabled = false
+      completeBtn.textContent = 'Mark Job Complete'
+      loadDispatch()
+    }
+
+    async function toggleTracking() {
+      tracking ? stopTracking() : startTracking()
+    }
+
+    async function startTracking() {
+      if (!navigator.geolocation) {
+        alert('GPS is not available on this device.')
+        return
+      }
+
+      try {
+        if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen')
+      } catch (e) {}
+
+      watchId = navigator.geolocation.watchPosition(
+        pos => {
+          lastPosition = pos
+          if (!tracking) firstActivate()
+          sendLocation(pos)
+        },
+        err => {
+          document.getElementById('statusLabel').textContent = 'GPS error'
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      )
+
+      sendInterval = setInterval(() => {
+        if (lastPosition) sendLocation(lastPosition)
+      }, 20000)
+
+      tracking = true
+      document.getElementById('trackToggle').textContent = 'Pause GPS tracking'
+    }
+
+    function firstActivate() {
+      document.getElementById('statusRing').classList.add('active')
+      document.getElementById('statusLabel').textContent = 'Live'
+    }
+
+    function stopTracking() {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId)
+      if (sendInterval) clearInterval(sendInterval)
+      if (wakeLock) { try { wakeLock.release() } catch(e) {} wakeLock = null }
+      tracking = false
+      watchId = null
+      sendInterval = null
+      lastPosition = null
+      document.getElementById('statusRing').classList.remove('active')
+      document.getElementById('statusLabel').textContent = 'Paused'
+      document.getElementById('trackToggle').textContent = 'Resume GPS tracking'
+    }
+
+    async function sendLocation(pos) {
+      const { error } = await sb.from('location_updates').insert({
+        user_id: currentUser.id,
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+        speed: pos.coords.speed,
+        heading: pos.coords.heading
+      })
+      if (!error) {
+        document.getElementById('infoLastSent').textContent = 'Last ping ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    }
+
+    async function signOut() {
+      stopTracking()
+      await sb.auth.signOut()
+      window.location.href = 'index.html'
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        if (regs.length > 0) {
+          Promise.all(regs.map(r => r.unregister())).then(() => window.location.reload())
+        }
+      })
+    }
+  </script>
+</body>
+</html>

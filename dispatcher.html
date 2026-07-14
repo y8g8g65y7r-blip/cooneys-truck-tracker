@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Cooney's Trucking — Dispatch</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#15161a">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f4f5f7;
+      min-height: 100vh;
+    }
+    .header {
+      background: #15161a;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-logo { font-size: 16px; font-weight: 900; color: #ff6a1a; letter-spacing: 1px; }
+    .header-right { display: flex; gap: 8px; }
+    .btn-nav {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .main { max-width: 600px; margin: 0 auto; padding: 20px 16px 48px; }
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    }
+    .card-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #15161a;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-title::before {
+      content: '';
+      display: block;
+      width: 4px;
+      height: 18px;
+      background: #ff6a1a;
+      border-radius: 2px;
+    }
+    .field { margin-bottom: 14px; }
+    .field label {
+      display: block;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 5px;
+    }
+    .field input, .field textarea, .field select {
+      width: 100%;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 13px 14px;
+      font-size: 15px;
+      color: #15161a;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.2s;
+      background: #fff;
+    }
+    .field input:focus, .field textarea:focus, .field select:focus { border-color: #ff6a1a; }
+    .field textarea { resize: vertical; min-height: 70px; }
+    .address-row { display: flex; gap: 8px; }
+    .address-row input { flex: 1; }
+    .btn-geocode {
+      background: #15161a;
+      color: #ff6a1a;
+      border: none;
+      border-radius: 10px;
+      padding: 0 16px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-geocode:disabled { opacity: 0.4; cursor: not-allowed; }
+    .geocode-result { font-size: 12px; color: #22c55e; margin-top: 6px; display: none; }
+    .geocode-error { font-size: 12px; color: #ef4444; margin-top: 6px; display: none; }
+
+    .btn-submit {
+      width: 100%;
+      background: #ff6a1a;
+      color: #15161a;
+      border: none;
+      border-radius: 12px;
+      padding: 18px;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-submit:not(:disabled):active { transform: scale(0.98); }
+    .success-msg {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      color: #16a34a;
+      border-radius: 10px;
+      padding: 14px;
+      font-size: 14px;
+      font-weight: 600;
+      text-align: center;
+      display: none;
+      margin-top: 12px;
+    }
+
+    .dispatch-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid #eef0f2;
+      gap: 10px;
+    }
+    .dispatch-item:last-child { border-bottom: none; }
+    .dispatch-unit {
+      background: #15161a;
+      color: #ff6a1a;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 4px 8px;
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+    .dispatch-info { flex: 1; min-width: 0; }
+    .dispatch-info .addr { font-size: 13px; font-weight: 600; color: #15161a; }
+    .dispatch-info .meta { font-size: 11px; color: #9aa0a6; }
+    .btn-cancel {
+      background: none;
+      border: 1px solid #fca5a5;
+      color: #ef4444;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .empty-state { color: #9aa0a6; font-size: 13px; text-align: center; padding: 8px 0; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-logo">COONEY'S DISPATCH</div>
+    <div class="header-right">
+      <a href="map.html" class="btn-nav">📍 Live Map</a>
+      <button class="btn-nav" onclick="signOut()">Sign Out</button>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <div class="card">
+      <div class="card-title">Send Dispatch</div>
+
+      <div class="field">
+        <label>Driver / Unit</label>
+        <select id="driverSelect">
+          <option value="">Loading drivers...</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Site Address</label>
+        <div class="address-row">
+          <input type="text" id="siteAddress" placeholder="e.g. 123 Main St SW, Calgary, AB">
+          <button class="btn-geocode" id="geocodeBtn" onclick="geocodeAddress()">Find 📍</button>
+        </div>
+        <div class="geocode-result" id="geocodeResult"></div>
+        <div class="geocode-error" id="geocodeError"></div>
+      </div>
+
+      <div class="field">
+        <label>Notes (optional)</label>
+        <textarea id="notes" placeholder="Load type, contact on site, special instructions..."></textarea>
+      </div>
+
+      <button class="btn-submit" id="submitBtn" onclick="submitDispatch()">Send Dispatch</button>
+      <div class="success-msg" id="successMsg">✓ Dispatch sent</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Active Dispatches</div>
+      <div id="activeList"><div class="empty-state">Loading...</div></div>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script>
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    let currentUser = null
+    let geocodedLat = null
+    let geocodedLng = null
+    let driverMap = {}
+
+    sb.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) { window.location.href = 'index.html'; return }
+      currentUser = session.user
+      const { data: profile } = await sb.from('profiles').select('role').eq('id', session.user.id).single()
+      if (profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
+      loadDrivers()
+      loadActiveDispatches()
+      setInterval(loadActiveDispatches, 20000)
+    })
+
+    async function loadDrivers() {
+      const { data } = await sb.from('profiles').select('id, full_name, unit_number').eq('role', 'driver').order('unit_number')
+      const select = document.getElementById('driverSelect')
+      if (!data || data.length === 0) {
+        select.innerHTML = '<option value="">No drivers found</option>'
+        return
+      }
+      driverMap = {}
+      data.forEach(d => { driverMap[d.id] = d })
+      select.innerHTML = data.map(d => `<option value="${d.id}">Unit ${d.unit_number || '—'} — ${d.full_name}</option>`).join('')
+    }
+
+    async function geocodeAddress() {
+      const address = document.getElementById('siteAddress').value.trim()
+      if (!address) return
+      const btn = document.getElementById('geocodeBtn')
+      const resultEl = document.getElementById('geocodeResult')
+      const errorEl = document.getElementById('geocodeError')
+      btn.disabled = true
+      btn.textContent = '...'
+      resultEl.style.display = 'none'
+      errorEl.style.display = 'none'
+
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`
+        const res = await fetch(url, { headers: { 'User-Agent': 'CooneysTruckTracker/1.0' } })
+        const data = await res.json()
+        if (data.length > 0) {
+          geocodedLat = parseFloat(data[0].lat)
+          geocodedLng = parseFloat(data[0].lon)
+          resultEl.textContent = `✓ Found: ${data[0].display_name}`
+          resultEl.style.display = 'block'
+        } else {
+          errorEl.textContent = 'Address not found. Try a more specific address.'
+          errorEl.style.display = 'block'
+          geocodedLat = null
+          geocodedLng = null
+        }
+      } catch (e) {
+        errorEl.textContent = 'Could not look up address. Check your connection.'
+        errorEl.style.display = 'block'
+      }
+
+      btn.disabled = false
+      btn.textContent = 'Find 📍'
+    }
+
+    async function submitDispatch() {
+      const driverId = document.getElementById('driverSelect').value
+      const address = document.getElementById('siteAddress').value.trim()
+      const notes = document.getElementById('notes').value.trim()
+
+      if (!driverId || !address) {
+        alert('Please select a driver and enter a site address.')
+        return
+      }
+
+      const btn = document.getElementById('submitBtn')
+      btn.disabled = true
+      btn.textContent = 'Sending...'
+
+      const { error } = await sb.from('dispatches').insert({
+        driver_id: driverId,
+        site_address: address,
+        lat: geocodedLat,
+        lng: geocodedLng,
+        notes: notes || null,
+        created_by: currentUser.id
+      })
+
+      if (error) {
+        alert('Error sending dispatch: ' + error.message)
+        btn.disabled = false
+        btn.textContent = 'Send Dispatch'
+        return
+      }
+
+      document.getElementById('successMsg').style.display = 'block'
+      btn.textContent = '✓ Sent'
+
+      setTimeout(() => {
+        document.getElementById('siteAddress').value = ''
+        document.getElementById('notes').value = ''
+        document.getElementById('geocodeResult').style.display = 'none'
+        geocodedLat = null
+        geocodedLng = null
+        btn.textContent = 'Send Dispatch'
+        btn.disabled = false
+        document.getElementById('successMsg').style.display = 'none'
+      }, 2000)
+
+      loadActiveDispatches()
+    }
+
+    async function loadActiveDispatches() {
+      const { data } = await sb.from('dispatches')
+        .select('*')
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+
+      const list = document.getElementById('activeList')
+      if (!data || data.length === 0) {
+        list.innerHTML = '<div class="empty-state">No active dispatches</div>'
+        return
+      }
+
+      list.innerHTML = data.map(d => {
+        const driver = driverMap[d.driver_id]
+        const unit = driver?.unit_number || '—'
+        const name = driver?.full_name || 'Unknown driver'
+        const timeStr = new Date(d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        return `
+          <div class="dispatch-item">
+            <span class="dispatch-unit">U${unit}</span>
+            <div class="dispatch-info">
+              <div class="addr">${d.site_address}</div>
+              <div class="meta">${name} · sent ${timeStr}</div>
+            </div>
+            <button class="btn-cancel" onclick="cancelDispatch('${d.id}')">Cancel</button>
+          </div>
+        `
+      }).join('')
+    }
+
+    async function cancelDispatch(id) {
+      if (!confirm('Cancel this dispatch?')) return
+      await sb.from('dispatches').update({ status: 'cancelled' }).eq('id', id)
+      loadActiveDispatches()
+    }
+
+    async function signOut() {
+      await sb.auth.signOut()
+      window.location.href = 'index.html'
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        if (regs.length > 0) {
+          Promise.all(regs.map(r => r.unregister())).then(() => window.location.reload())
+        }
+      })
+    }
+  </script>
+</body>
+</html>

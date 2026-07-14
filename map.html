@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Cooney's Trucking — Live Map</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#15161a">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f4f5f7;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      background: #15161a;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      flex-shrink: 0;
+    }
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-logo { font-size: 16px; font-weight: 900; color: #ff6a1a; letter-spacing: 1px; }
+    .live-badge {
+      background: #22c55e;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      animation: blink 2s infinite;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .btn-back {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .refresh-info { font-size: 11px; color: rgba(255,255,255,0.4); }
+    #map { flex: 1; min-height: calc(100vh - 120px); z-index: 1; }
+    .roster {
+      background: #15161a;
+      padding: 12px 16px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .roster-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 20px;
+      padding: 6px 12px;
+      font-size: 12px;
+      color: #fff;
+      font-weight: 600;
+    }
+    .roster-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+    .roster-chip .dot.offline { background: #6c757d; }
+    .roster-chip .time { color: rgba(255,255,255,0.4); font-size: 10px; font-weight: 400; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-logo">COONEY'S</div>
+      <span class="live-badge">Live</span>
+    </div>
+    <div class="header-right">
+      <span class="refresh-info" id="refreshInfo">—</span>
+      <a href="dispatcher.html" class="btn-back">← Dispatch</a>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="roster" id="roster"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    let map = null
+    let markers = {}
+
+    sb.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) { window.location.href = 'index.html'; return }
+      const { data: profile } = await sb.from('profiles').select('role').eq('id', session.user.id).single()
+      if (profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
+      initMap()
+      loadLocations()
+      setInterval(loadLocations, 15000)
+    })
+
+    function initMap() {
+      map = L.map('map').setView([51.0447, -114.0719], 11) // Default: Calgary
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
+      }).addTo(map)
+    }
+
+    async function loadLocations() {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+
+      const [{ data: locData }, { data: profileData }] = await Promise.all([
+        sb.from('location_updates')
+          .select('*')
+          .gte('created_at', fiveMinAgo)
+          .order('created_at', { ascending: false }),
+        sb.from('profiles').select('id, full_name, unit_number').eq('role', 'driver')
+      ])
+
+      const profileMap = {}
+      profileData?.forEach(p => { profileMap[p.id] = p })
+
+      // Latest location per driver
+      const latestByUser = {}
+      ;(locData || []).forEach(loc => {
+        if (!latestByUser[loc.user_id]) latestByUser[loc.user_id] = loc
+      })
+
+      // All drivers who've pinged in the last 24h, for the roster strip
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      const { data: recentData } = await sb.from('location_updates')
+        .select('user_id, created_at')
+        .gte('created_at', oneDayAgo)
+        .order('created_at', { ascending: false })
+
+      const recentByUser = {}
+      ;(recentData || []).forEach(loc => {
+        if (!recentByUser[loc.user_id]) recentByUser[loc.user_id] = loc
+      })
+
+      const activeIds = new Set(Object.keys(latestByUser))
+
+      // Remove stale markers
+      Object.keys(markers).forEach(uid => {
+        if (!activeIds.has(uid)) {
+          map.removeLayer(markers[uid])
+          delete markers[uid]
+        }
+      })
+
+      // Add/update markers
+      const bounds = []
+      activeIds.forEach(uid => {
+        const loc = latestByUser[uid]
+        const profile = profileMap[uid]
+        const unit = profile?.unit_number || '?'
+        const name = profile?.full_name || 'Unknown'
+        const lat = parseFloat(loc.lat)
+        const lng = parseFloat(loc.lng)
+        const timeStr = new Date(loc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const speedStr = loc.speed != null ? ` · ${Math.round(loc.speed * 3.6)} km/h` : ''
+
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="background:#15161a;color:#ff6a1a;border:3px solid #ff6a1a;border-radius:50% 50% 50% 0;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4)"><span style="transform:rotate(45deg)">${unit}</span></div>`,
+          iconSize: [38, 38],
+          iconAnchor: [8, 38]
+        })
+
+        const popup = `<b>Unit ${unit}</b> — ${name}<br>Last update: ${timeStr}${speedStr}<br>±${Math.round(loc.accuracy || 0)}m accuracy`
+
+        if (markers[uid]) {
+          markers[uid].setLatLng([lat, lng])
+          markers[uid].setPopupContent(popup)
+        } else {
+          markers[uid] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup)
+        }
+        bounds.push([lat, lng])
+      })
+
+      if (bounds.length > 0) {
+        if (bounds.length === 1) {
+          map.setView(bounds[0], 14)
+        } else {
+          map.fitBounds(bounds, { padding: [40, 40] })
+        }
+      }
+
+      // Roster strip
+      const roster = document.getElementById('roster')
+      const rosterUsers = Object.keys(recentByUser)
+      if (rosterUsers.length === 0) {
+        roster.innerHTML = '<span style="color:rgba(255,255,255,0.3);font-size:12px;">No trucks have tracked today</span>'
+      } else {
+        roster.innerHTML = rosterUsers.map(uid => {
+          const active = activeIds.has(uid)
+          const profile = profileMap[uid]
+          const unit = profile?.unit_number || '?'
+          const name = profile?.full_name || 'Unknown'
+          const lastSeen = new Date(recentByUser[uid].created_at)
+          const timeStr = lastSeen.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          return `<div class="roster-chip">
+            <div class="dot${active ? '' : ' offline'}"></div>
+            Unit ${unit} — ${name}
+            <span class="time">${active ? 'Live' : timeStr}</span>
+          </div>`
+        }).join('')
+      }
+
+      document.getElementById('refreshInfo').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    }
+  </script>
+</body>
+</html>
