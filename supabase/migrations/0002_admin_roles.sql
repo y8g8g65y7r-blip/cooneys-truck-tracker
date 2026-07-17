@@ -108,31 +108,67 @@ create trigger protect_profile_privileged_columns_trg
   for each row execute procedure public.protect_profile_privileged_columns();
 
 -- 4. RLS POLICIES: drop each "Dispatchers ..." policy and recreate as
---    "Admins ..." comparing get_my_role() = 'admin'.
+--    "Admins ..." comparing get_my_role() = 'admin'. Each new policy is also
+--    dropped-if-exists first so this migration is safe to re-run.
 
 -- profiles
 drop policy if exists "Dispatchers view all profiles" on public.profiles;
+drop policy if exists "Admins view all profiles" on public.profiles;
 create policy "Admins view all profiles" on public.profiles
   for select using (public.get_my_role() = 'admin');
 
 drop policy if exists "Dispatchers update all profiles" on public.profiles;
+drop policy if exists "Admins update all profiles" on public.profiles;
 create policy "Admins update all profiles" on public.profiles
   for update using (public.get_my_role() = 'admin');
 
 -- location_updates
 drop policy if exists "Dispatchers view all locations" on public.location_updates;
+drop policy if exists "Admins view all locations" on public.location_updates;
 create policy "Admins view all locations" on public.location_updates
   for select using (public.get_my_role() = 'admin');
 
 -- dispatches
 drop policy if exists "Dispatchers view all dispatches" on public.dispatches;
+drop policy if exists "Admins view all dispatches" on public.dispatches;
 create policy "Admins view all dispatches" on public.dispatches
   for select using (public.get_my_role() = 'admin');
 
 drop policy if exists "Dispatchers insert dispatches" on public.dispatches;
+drop policy if exists "Admins insert dispatches" on public.dispatches;
 create policy "Admins insert dispatches" on public.dispatches
   for insert with check (public.get_my_role() = 'admin');
 
 drop policy if exists "Dispatchers update all dispatches" on public.dispatches;
+drop policy if exists "Admins update all dispatches" on public.dispatches;
 create policy "Admins update all dispatches" on public.dispatches
   for update using (public.get_my_role() = 'admin');
+
+-- 5. SECURITY: lock dispatch columns for non-admins.
+--    The "Drivers update own dispatch status" policy authorises a driver to
+--    update their own dispatch row, but RLS cannot restrict WHICH columns, so a
+--    driver could rewrite site_address / created_by / notes etc. on their own
+--    jobs. This BEFORE UPDATE trigger forces every column except status and
+--    completed_at back to its prior value for any authenticated non-admin, so a
+--    driver can only ever mark a job complete. Admins (and the null-uid SQL /
+--    service path) pass through unchanged.
+create or replace function public.protect_dispatch_columns()
+returns trigger as $$
+begin
+  if auth.uid() is not null and public.get_my_role() is distinct from 'admin' then
+    new.driver_id    := old.driver_id;
+    new.site_address := old.site_address;
+    new.lat          := old.lat;
+    new.lng          := old.lng;
+    new.notes        := old.notes;
+    new.created_by   := old.created_by;
+    new.created_at   := old.created_at;
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists protect_dispatch_columns_trg on public.dispatches;
+create trigger protect_dispatch_columns_trg
+  before update on public.dispatches
+  for each row execute procedure public.protect_dispatch_columns();

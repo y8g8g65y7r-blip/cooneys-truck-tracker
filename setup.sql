@@ -143,6 +143,33 @@ create policy "Admins insert dispatches" on public.dispatches
 create policy "Admins update all dispatches" on public.dispatches
   for update using (public.get_my_role() = 'admin');
 
+-- SECURITY: lock dispatch columns for non-admins. The "Drivers update own
+-- dispatch status" policy authorises the row but RLS cannot restrict columns,
+-- so without this a driver could rewrite site_address / created_by / notes on
+-- their own jobs. This BEFORE UPDATE trigger forces every column except status
+-- and completed_at back to its prior value for any authenticated non-admin, so
+-- a driver can only mark a job complete. Admins and the null-uid SQL/service
+-- path pass through unchanged.
+create or replace function public.protect_dispatch_columns()
+returns trigger as $$
+begin
+  if auth.uid() is not null and public.get_my_role() is distinct from 'admin' then
+    new.driver_id    := old.driver_id;
+    new.site_address := old.site_address;
+    new.lat          := old.lat;
+    new.lng          := old.lng;
+    new.notes        := old.notes;
+    new.created_by   := old.created_by;
+    new.created_at   := old.created_at;
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger protect_dispatch_columns_trg
+  before update on public.dispatches
+  for each row execute procedure public.protect_dispatch_columns();
+
 -- ============================================================
 -- AFTER RUNNING THE ABOVE:
 --

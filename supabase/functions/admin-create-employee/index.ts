@@ -25,6 +25,11 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+// CORS is intentionally open. Auth is a Bearer JWT in the Authorization header
+// (not an ambient cookie), so a third-party origin cannot forge an authenticated
+// call, and the Capacitor app's WebView origin is non-standard (capacitor://localhost
+// on iOS, http://localhost on Android) — pinning a single origin would break the
+// native build. If this ever moves to a fixed web origin only, tighten this to it.
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',

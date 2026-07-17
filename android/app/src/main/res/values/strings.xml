@@ -7,5 +7,5 @@
 
     <string name="capacitor_background_geolocation_notification_channel_name">Truck Tracking</string>
     <string name="capacitor_background_geolocation_notification_icon">mipmap/ic_launcher</string>
-    <string name="capacitor_background_geolocation_notification_color">#ff6a1a</string>
+    <string name="capacitor_background_geolocation_notification_color">#004AAD</string>
 </resources>
