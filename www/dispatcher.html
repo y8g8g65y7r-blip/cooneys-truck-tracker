@@ -6,6 +6,7 @@
   <title>Cooney's Trucking — Dispatch</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#15161a">
+  <link rel="stylesheet" href="theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -23,7 +24,7 @@
       top: 0;
       z-index: 100;
     }
-    .header-logo { font-size: 16px; font-weight: 900; color: #ff6a1a; letter-spacing: 1px; }
+    .header-logo { font-size: 16px; font-weight: 900; color: var(--brand-blue); letter-spacing: 1px; }
     .header-right { display: flex; gap: 8px; }
     .btn-nav {
       background: rgba(255,255,255,0.1);
@@ -59,7 +60,7 @@
       display: block;
       width: 4px;
       height: 18px;
-      background: #ff6a1a;
+      background: var(--brand-blue);
       border-radius: 2px;
     }
     .field { margin-bottom: 14px; }
@@ -84,13 +85,13 @@
       transition: border-color 0.2s;
       background: #fff;
     }
-    .field input:focus, .field textarea:focus, .field select:focus { border-color: #ff6a1a; }
+    .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--brand-blue); }
     .field textarea { resize: vertical; min-height: 70px; }
     .address-row { display: flex; gap: 8px; }
     .address-row input { flex: 1; }
     .btn-geocode {
       background: #15161a;
-      color: #ff6a1a;
+      color: var(--brand-blue);
       border: none;
       border-radius: 10px;
       padding: 0 16px;
@@ -106,8 +107,8 @@
 
     .btn-submit {
       width: 100%;
-      background: #ff6a1a;
-      color: #15161a;
+      background: var(--brand-blue);
+      color: #ffffff;
       border: none;
       border-radius: 12px;
       padding: 18px;
@@ -142,7 +143,7 @@
     .dispatch-item:last-child { border-bottom: none; }
     .dispatch-unit {
       background: #15161a;
-      color: #ff6a1a;
+      color: var(--brand-blue);
       font-size: 11px;
       font-weight: 800;
       padding: 4px 8px;

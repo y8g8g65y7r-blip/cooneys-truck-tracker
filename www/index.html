@@ -10,6 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="CT Tracker">
   <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -29,7 +30,7 @@
     .logo-top {
       font-size: 36px;
       font-weight: 900;
-      color: #ff6a1a;
+      color: var(--brand-blue);
       letter-spacing: 1px;
       line-height: 1;
     }
@@ -47,10 +48,19 @@
     }
 
     .logo-tagline {
-      color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.55);
       font-size: 12px;
-      margin-top: 10px;
+      margin-top: 12px;
       letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .logo-since {
+      color: rgba(255,255,255,0.3);
+      font-size: 10px;
+      font-weight: 700;
+      margin-top: 5px;
+      letter-spacing: 3px;
       text-transform: uppercase;
     }
 
@@ -95,12 +105,12 @@
       transition: border-color 0.2s;
     }
 
-    .field input:focus { border-color: #ff6a1a; }
+    .field input:focus { border-color: var(--brand-blue); }
 
     .btn-primary {
       width: 100%;
       background: #15161a;
-      color: #ff6a1a;
+      color: var(--brand-blue);
       border: none;
       border-radius: 10px;
       padding: 17px;
@@ -114,7 +124,7 @@
     }
 
     .btn-primary:hover { background: #24262e; }
-    .btn-primary:active { background: #ff6a1a; color: #15161a; }
+    .btn-primary:active { background: var(--brand-blue); color: #ffffff; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .error {
@@ -134,7 +144,8 @@
   <div class="logo">
     <div class="logo-top">COONEY'S</div>
     <div class="logo-sub">TRUCKING</div>
-    <div class="logo-tagline">Truck Tracker</div>
+    <div class="logo-tagline">Moving Earth, Driving Progress</div>
+    <div class="logo-since">Since 1996</div>
   </div>
 
   <div class="card">

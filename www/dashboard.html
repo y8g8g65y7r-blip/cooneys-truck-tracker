@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#15161a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="stylesheet" href="theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -25,10 +26,10 @@
       border-bottom: 1px solid rgba(255,255,255,0.08);
     }
     .header-left { display: flex; align-items: center; gap: 10px; }
-    .header-logo { font-size: 16px; font-weight: 900; color: #ff6a1a; letter-spacing: 1px; }
+    .header-logo { font-size: 16px; font-weight: 900; color: var(--brand-blue); letter-spacing: 1px; }
     .unit-badge {
-      background: #ff6a1a;
-      color: #15161a;
+      background: var(--brand-blue);
+      color: #ffffff;
       font-size: 11px;
       font-weight: 800;
       padding: 4px 9px;
@@ -130,10 +131,10 @@
       font-weight: 800;
       letter-spacing: 0.5px;
       cursor: pointer;
-      background: #ff6a1a;
-      color: #15161a;
+      background: var(--brand-blue);
+      color: #ffffff;
     }
-    .btn-directions:active { background: #e0590f; }
+    .btn-directions:active { background: var(--brand-blue-hover); }
     .btn-directions:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .btn-complete {
