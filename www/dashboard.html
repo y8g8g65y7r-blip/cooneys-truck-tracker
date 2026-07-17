@@ -26,6 +26,7 @@
       border-bottom: 1px solid rgba(255,255,255,0.08);
     }
     .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-img { height: 34px; width: auto; display: block; }
     .header-logo { font-size: 16px; font-weight: 900; color: var(--brand-blue); letter-spacing: 1px; }
     .unit-badge {
       background: var(--brand-blue);
@@ -175,7 +176,7 @@
 
   <div class="header">
     <div class="header-left">
-      <div class="header-logo">COONEY'S</div>
+      <img src="logo.png" alt="Cooney's" class="header-img" width="51" height="34">
       <span class="unit-badge" id="unitBadge">UNIT —</span>
     </div>
     <button class="btn-signout" onclick="signOut()">Sign Out</button>

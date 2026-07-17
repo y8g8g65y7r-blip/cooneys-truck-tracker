@@ -24,6 +24,8 @@
       top: 0;
       z-index: 100;
     }
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-img { height: 34px; width: auto; display: block; }
     .header-logo { font-size: 16px; font-weight: 900; color: var(--brand-blue); letter-spacing: 1px; }
     .header-right { display: flex; gap: 8px; }
     .btn-nav {
@@ -170,7 +172,10 @@
 <body>
 
   <div class="header">
-    <div class="header-logo">COONEY'S DISPATCH</div>
+    <div class="header-left">
+      <img src="logo.png" alt="Cooney's" class="header-img" width="51" height="34">
+      <div class="header-logo">DISPATCH</div>
+    </div>
     <div class="header-right">
       <a href="employees.html" class="btn-nav">Employees</a>
       <a href="map.html" class="btn-nav">📍 Live Map</a>
