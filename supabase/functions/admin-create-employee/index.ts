@@ -107,6 +107,17 @@ Deno.serve(async (req) => {
         400,
       )
     }
+    // Basic email shape + minimum password length (defense in depth; Supabase
+    // also enforces its own password policy).
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return json({ ok: false, error: 'Please enter a valid email address' }, 400)
+    }
+    if (password.length < 8) {
+      return json(
+        { ok: false, error: 'Temporary password must be at least 8 characters' },
+        400,
+      )
+    }
     if (employment_type !== 'staff' && employment_type !== 'contractor') {
       return json(
         { ok: false, error: "employment_type must be 'staff' or 'contractor'" },

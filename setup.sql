@@ -14,7 +14,11 @@ create table public.profiles (
 );
 
 -- 2. AUTO-CREATE PROFILE ON SIGNUP
---    role + employment_type are read from user metadata with safe defaults.
+--    SECURITY: role is HARDCODED to 'driver' and is NEVER read from signup
+--    metadata (raw_user_meta_data is attacker-controlled on anon self sign-up,
+--    so trusting role there would allow self-promotion to admin). New users are
+--    always drivers; admins are promoted via the trusted UPDATE at the bottom of
+--    this file. employment_type is a non-privileged reporting field.
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
@@ -23,7 +27,7 @@ begin
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', new.email),
     new.raw_user_meta_data->>'unit_number',
-    coalesce(new.raw_user_meta_data->>'role', 'driver'),
+    'driver',
     coalesce(new.raw_user_meta_data->>'employment_type', 'staff')
   );
   return new;
@@ -39,6 +43,31 @@ create or replace function public.get_my_role()
 returns text as $$
   select role from public.profiles where id = auth.uid();
 $$ language sql security definer stable;
+
+-- 3b. SECURITY: lock privileged columns against self-escalation.
+--     The "Users update own profile" policy (below) lets a driver update their
+--     own row (name / unit). Without this guard they could also flip
+--     role='admin' on that row and pass the edge-function admin gate. This
+--     BEFORE UPDATE trigger forces role / employment_type / active back to their
+--     prior values for any authenticated NON-admin caller. auth.uid() IS NOT
+--     NULL lets the trusted paths through (the SQL editor and service-role calls
+--     have a null auth.uid()), so the admin-bootstrap UPDATE at the bottom of
+--     this file still works.
+create or replace function public.protect_profile_privileged_columns()
+returns trigger as $$
+begin
+  if auth.uid() is not null and public.get_my_role() is distinct from 'admin' then
+    new.role := old.role;
+    new.employment_type := old.employment_type;
+    new.active := old.active;
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger protect_profile_privileged_columns_trg
+  before update on public.profiles
+  for each row execute procedure public.protect_profile_privileged_columns();
 
 -- 4. LOCATION UPDATES (GPS pings)
 create table public.location_updates (

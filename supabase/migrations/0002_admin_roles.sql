@@ -57,8 +57,13 @@ alter table public.profiles
 alter table public.profiles
   add column if not exists active boolean not null default true;
 
--- 3. TRIGGER: recreate handle_new_user() to also read role + employment_type
---    from user metadata, with safe defaults.
+-- 3. TRIGGER: recreate handle_new_user().
+--    SECURITY: role is HARDCODED to 'driver' and is NEVER read from signup
+--    metadata. raw_user_meta_data is fully attacker-controlled during self
+--    sign-up (anon key), so trusting role there would let anyone create an
+--    admin for themselves. New users are always drivers; admins are promoted
+--    via a trusted UPDATE (see the bottom of setup.sql). employment_type is a
+--    non-privileged reporting field, so a default-from-metadata is acceptable.
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
@@ -67,7 +72,7 @@ begin
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', new.email),
     new.raw_user_meta_data->>'unit_number',
-    coalesce(new.raw_user_meta_data->>'role', 'driver'),
+    'driver',
     coalesce(new.raw_user_meta_data->>'employment_type', 'staff')
   );
   return new;
@@ -75,6 +80,32 @@ end;
 $$ language plpgsql security definer;
 
 -- get_my_role() is unchanged; left as-is.
+
+-- 3b. SECURITY: lock privileged columns against self-escalation.
+--     The "Users update own profile" policy lets a driver update their own row
+--     (name / unit). Without this guard a driver could also set role='admin' on
+--     that same row and then pass the edge-function admin gate. This BEFORE
+--     UPDATE trigger forces role / employment_type / active back to their prior
+--     values for any authenticated NON-admin caller. The auth.uid() IS NOT NULL
+--     check lets the trusted paths through: the SQL editor and service-role
+--     calls run with a null auth.uid(), so the documented admin-bootstrap
+--     UPDATE still works.
+create or replace function public.protect_profile_privileged_columns()
+returns trigger as $$
+begin
+  if auth.uid() is not null and public.get_my_role() is distinct from 'admin' then
+    new.role := old.role;
+    new.employment_type := old.employment_type;
+    new.active := old.active;
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists protect_profile_privileged_columns_trg on public.profiles;
+create trigger protect_profile_privileged_columns_trg
+  before update on public.profiles
+  for each row execute procedure public.protect_profile_privileged_columns();
 
 -- 4. RLS POLICIES: drop each "Dispatchers ..." policy and recreate as
 --    "Admins ..." comparing get_my_role() = 'admin'.
