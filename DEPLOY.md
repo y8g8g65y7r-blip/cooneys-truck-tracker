@@ -14,6 +14,14 @@ be applied to Supabase once, then the web build ships as usual.
 Each driver also has an `employment_type` of `staff` or `contractor` (for
 reporting) and an `active` flag (soft-disable without deleting history).
 
+**Role values during the native-app rollout.** Because the app is a native
+build with `www/` bundled on-device, installed phones can't update instantly.
+The DB, RLS, Edge Function, and new frontend therefore treat **both**
+`dispatcher` and `admin` as privileged (migration `0003`). Existing privileged
+users stay `dispatcher` so the *installed* app keeps working; the new build
+accepts either. Once every admin is on the new build you can standardise on
+`admin` with a single `UPDATE` — nothing else needs to change.
+
 ## 1. Apply the database migration
 
 Run **`supabase/migrations/0002_admin_roles.sql`** once against the project
@@ -35,13 +43,15 @@ The app can't create logins with the public anon key, so provisioning goes
 through a server-side function that holds the service-role key.
 
 ```bash
-supabase functions deploy admin-create-employee
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<your service_role key>
+supabase functions deploy admin-create-employee --project-ref <ref>
 ```
 
-`SUPABASE_URL` and `SUPABASE_ANON_KEY` are injected automatically — you do **not**
-set those as secrets. The service-role key lives only here on the server; it is
-never in `www/` and never sent to the browser.
+You do **not** set any secret. Supabase auto-injects `SUPABASE_URL`,
+`SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` into every Edge Function at
+runtime (and it actually blocks setting any secret whose name starts with
+`SUPABASE_`). So deploying the function is enough — `Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')`
+works out of the box. The service-role key stays server-side; it is never in
+`www/` and never sent to the browser.
 
 ## 3. Promote your first admin
 

@@ -197,7 +197,7 @@
 
     async function redirectByRole(userId) {
       const { data } = await sb.from('profiles').select('role').eq('id', userId).single()
-      window.location.href = data?.role === 'admin' ? 'dispatcher.html' : 'dashboard.html'
+      window.location.href = (data?.role === 'admin' || data?.role === 'dispatcher') ? 'dispatcher.html' : 'dashboard.html'
     }
 
     document.addEventListener('keydown', e => { if (e.key === 'Enter') login() })

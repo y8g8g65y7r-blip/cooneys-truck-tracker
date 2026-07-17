@@ -8,7 +8,7 @@ create table public.profiles (
   id uuid references auth.users on delete cascade primary key,
   full_name text not null,
   unit_number text,
-  role text not null default 'driver' check (role in ('driver', 'admin')),
+  role text not null default 'driver' check (role in ('driver', 'dispatcher', 'admin')),
   employment_type text not null default 'staff' check (employment_type in ('staff', 'contractor')),
   active boolean not null default true
 );
@@ -56,7 +56,9 @@ $$ language sql security definer stable;
 create or replace function public.protect_profile_privileged_columns()
 returns trigger as $$
 begin
-  if auth.uid() is not null and public.get_my_role() is distinct from 'admin' then
+  if auth.uid() is not null
+     and public.get_my_role() is distinct from 'admin'
+     and public.get_my_role() is distinct from 'dispatcher' then
     new.role := old.role;
     new.employment_type := old.employment_type;
     new.active := old.active;
@@ -109,13 +111,13 @@ create policy "Users view own profile" on public.profiles
   for select using (auth.uid() = id);
 
 create policy "Admins view all profiles" on public.profiles
-  for select using (public.get_my_role() = 'admin');
+  for select using (public.get_my_role() in ('admin', 'dispatcher'));
 
 create policy "Users update own profile" on public.profiles
   for update using (auth.uid() = id);
 
 create policy "Admins update all profiles" on public.profiles
-  for update using (public.get_my_role() = 'admin');
+  for update using (public.get_my_role() in ('admin', 'dispatcher'));
 
 -- Location updates: drivers insert/view their own; admins view all
 create policy "Drivers insert own location" on public.location_updates
@@ -125,7 +127,7 @@ create policy "Drivers view own location" on public.location_updates
   for select using (auth.uid() = user_id);
 
 create policy "Admins view all locations" on public.location_updates
-  for select using (public.get_my_role() = 'admin');
+  for select using (public.get_my_role() in ('admin', 'dispatcher'));
 
 -- Dispatches: drivers view/update (status) their own; admins manage all
 create policy "Drivers view own dispatches" on public.dispatches
@@ -135,13 +137,13 @@ create policy "Drivers update own dispatch status" on public.dispatches
   for update using (auth.uid() = driver_id);
 
 create policy "Admins view all dispatches" on public.dispatches
-  for select using (public.get_my_role() = 'admin');
+  for select using (public.get_my_role() in ('admin', 'dispatcher'));
 
 create policy "Admins insert dispatches" on public.dispatches
-  for insert with check (public.get_my_role() = 'admin');
+  for insert with check (public.get_my_role() in ('admin', 'dispatcher'));
 
 create policy "Admins update all dispatches" on public.dispatches
-  for update using (public.get_my_role() = 'admin');
+  for update using (public.get_my_role() in ('admin', 'dispatcher'));
 
 -- SECURITY: lock dispatch columns for non-admins. The "Drivers update own
 -- dispatch status" policy authorises the row but RLS cannot restrict columns,
@@ -153,7 +155,9 @@ create policy "Admins update all dispatches" on public.dispatches
 create or replace function public.protect_dispatch_columns()
 returns trigger as $$
 begin
-  if auth.uid() is not null and public.get_my_role() is distinct from 'admin' then
+  if auth.uid() is not null
+     and public.get_my_role() is distinct from 'admin'
+     and public.get_my_role() is distinct from 'dispatcher' then
     new.driver_id    := old.driver_id;
     new.site_address := old.site_address;
     new.lat          := old.lat;

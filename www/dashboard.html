@@ -230,7 +230,7 @@
       if (!session) { window.location.href = 'index.html'; return }
       currentUser = session.user
       const { data: profile } = await sb.from('profiles').select('full_name, unit_number, role').eq('id', session.user.id).single()
-      if (profile?.role === 'admin') { window.location.href = 'dispatcher.html'; return }
+      if (profile?.role === 'admin' || profile?.role === 'dispatcher') { window.location.href = 'dispatcher.html'; return }
       document.getElementById('infoName').textContent = profile?.full_name || 'Unknown'
       document.getElementById('unitBadge').textContent = 'UNIT ' + (profile?.unit_number || '—')
       loadDispatch()

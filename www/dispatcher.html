@@ -238,7 +238,7 @@
       if (!session) { window.location.href = 'index.html'; return }
       currentUser = session.user
       const { data: profile } = await sb.from('profiles').select('role').eq('id', session.user.id).single()
-      if (profile?.role !== 'admin') { window.location.href = 'dashboard.html'; return }
+      if (profile?.role !== 'admin' && profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
       loadDrivers()
       loadActiveDispatches()
       setInterval(loadActiveDispatches, 20000)

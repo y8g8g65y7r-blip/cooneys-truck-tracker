@@ -84,7 +84,13 @@ Deno.serve(async (req) => {
       .eq('id', user.id)
       .single()
 
-    if (profileError || !profile || profile.role !== 'admin') {
+    // Privileged = admin OR dispatcher (both recognised during the native-app
+    // rollout; the installed build still uses 'dispatcher').
+    if (
+      profileError ||
+      !profile ||
+      (profile.role !== 'admin' && profile.role !== 'dispatcher')
+    ) {
       return json({ ok: false, error: 'Admin access required' }, 403)
     }
 

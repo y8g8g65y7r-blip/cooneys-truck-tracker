@@ -115,7 +115,7 @@
     sb.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { window.location.href = 'index.html'; return }
       const { data: profile } = await sb.from('profiles').select('role').eq('id', session.user.id).single()
-      if (profile?.role !== 'admin') { window.location.href = 'dashboard.html'; return }
+      if (profile?.role !== 'admin' && profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
       initMap()
       loadLocations()
       setInterval(loadLocations, 15000)
