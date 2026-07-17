@@ -19,6 +19,7 @@ workflows:
       - name: Build signed release APK
         script: |
           cd android
+          chmod +x ./gradlew
           ./gradlew assembleRelease \
             -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/app/keystore.jks \
             -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
