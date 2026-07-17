@@ -6,6 +6,7 @@ workflows:
       groups:
         - android_signing
       node: latest
+      java: 21
       vars:
         PACKAGE_NAME: "com.cooneystrucking.trucktracker"
     scripts:
