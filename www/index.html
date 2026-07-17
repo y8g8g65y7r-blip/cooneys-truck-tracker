@@ -10,6 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="CT Tracker">
   <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -26,10 +27,12 @@
 
     .logo { text-align: center; margin-bottom: 36px; }
 
+    .logo-img { height: 100px; width: auto; display: block; margin: 0 auto 8px; }
+
     .logo-top {
       font-size: 36px;
       font-weight: 900;
-      color: #ff6a1a;
+      color: #ffffff;
       letter-spacing: 1px;
       line-height: 1;
     }
@@ -47,10 +50,19 @@
     }
 
     .logo-tagline {
-      color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.55);
       font-size: 12px;
-      margin-top: 10px;
+      margin-top: 12px;
       letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .logo-since {
+      color: rgba(255,255,255,0.3);
+      font-size: 10px;
+      font-weight: 700;
+      margin-top: 5px;
+      letter-spacing: 3px;
       text-transform: uppercase;
     }
 
@@ -95,12 +107,12 @@
       transition: border-color 0.2s;
     }
 
-    .field input:focus { border-color: #ff6a1a; }
+    .field input:focus { border-color: var(--brand-blue); }
 
     .btn-primary {
       width: 100%;
-      background: #15161a;
-      color: #ff6a1a;
+      background: var(--brand-blue);
+      color: #ffffff;
       border: none;
       border-radius: 10px;
       padding: 17px;
@@ -113,8 +125,8 @@
       transition: all 0.2s;
     }
 
-    .btn-primary:hover { background: #24262e; }
-    .btn-primary:active { background: #ff6a1a; color: #15161a; }
+    .btn-primary:hover { background: var(--brand-blue-hover); color: #ffffff; }
+    .btn-primary:active { background: var(--brand-blue-hover); color: #ffffff; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .error {
@@ -132,20 +144,20 @@
 <body>
 
   <div class="logo">
-    <div class="logo-top">COONEY'S</div>
-    <div class="logo-sub">TRUCKING</div>
-    <div class="logo-tagline">Truck Tracker</div>
+    <img src="logo.png" alt="Cooney's Trucking" class="logo-img" width="151" height="100">
+    <div class="logo-tagline">Moving Earth, Driving Progress</div>
+    <div class="logo-since">Since 1996</div>
   </div>
 
   <div class="card">
     <h2>Sign In</h2>
     <div class="error" id="error"></div>
     <div class="field">
-      <label>Email Address</label>
+      <label for="email">Email Address</label>
       <input type="email" id="email" placeholder="name@email.com" autocomplete="email">
     </div>
     <div class="field">
-      <label>Password</label>
+      <label for="password">Password</label>
       <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
     </div>
     <button class="btn-primary" id="loginBtn" onclick="login()">Sign In</button>
@@ -185,7 +197,7 @@
 
     async function redirectByRole(userId) {
       const { data } = await sb.from('profiles').select('role').eq('id', userId).single()
-      window.location.href = data?.role === 'dispatcher' ? 'dispatcher.html' : 'dashboard.html'
+      window.location.href = (data?.role === 'admin' || data?.role === 'dispatcher') ? 'dispatcher.html' : 'dashboard.html'
     }
 
     document.addEventListener('keydown', e => { if (e.key === 'Enter') login() })

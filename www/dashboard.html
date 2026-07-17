@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#15161a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="stylesheet" href="theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -25,10 +26,11 @@
       border-bottom: 1px solid rgba(255,255,255,0.08);
     }
     .header-left { display: flex; align-items: center; gap: 10px; }
-    .header-logo { font-size: 16px; font-weight: 900; color: #ff6a1a; letter-spacing: 1px; }
+    .header-img { height: 34px; width: auto; display: block; }
+    .header-logo { font-size: 16px; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
     .unit-badge {
-      background: #ff6a1a;
-      color: #15161a;
+      background: var(--brand-blue);
+      color: #ffffff;
       font-size: 11px;
       font-weight: 800;
       padding: 4px 9px;
@@ -107,6 +109,7 @@
       font-weight: 700;
       color: #15161a;
       margin-bottom: 6px;
+      overflow-wrap: anywhere;
     }
     .dispatch-notes {
       font-size: 13px;
@@ -130,10 +133,10 @@
       font-weight: 800;
       letter-spacing: 0.5px;
       cursor: pointer;
-      background: #ff6a1a;
-      color: #15161a;
+      background: var(--brand-blue);
+      color: #ffffff;
     }
-    .btn-directions:active { background: #e0590f; }
+    .btn-directions:active { background: var(--brand-blue-hover); }
     .btn-directions:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .btn-complete {
@@ -174,7 +177,7 @@
 
   <div class="header">
     <div class="header-left">
-      <div class="header-logo">COONEY'S</div>
+      <img src="logo.png" alt="Cooney's" class="header-img" width="51" height="34">
       <span class="unit-badge" id="unitBadge">UNIT —</span>
     </div>
     <button class="btn-signout" onclick="signOut()">Sign Out</button>
@@ -221,11 +224,13 @@
     let lastPosition = null
     let activeDispatch = null
 
+    function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
     sb.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { window.location.href = 'index.html'; return }
       currentUser = session.user
       const { data: profile } = await sb.from('profiles').select('full_name, unit_number, role').eq('id', session.user.id).single()
-      if (profile?.role === 'dispatcher') { window.location.href = 'dispatcher.html'; return }
+      if (profile?.role === 'admin' || profile?.role === 'dispatcher') { window.location.href = 'dispatcher.html'; return }
       document.getElementById('infoName').textContent = profile?.full_name || 'Unknown'
       document.getElementById('unitBadge').textContent = 'UNIT ' + (profile?.unit_number || '—')
       loadDispatch()
@@ -255,8 +260,8 @@
       }
 
       body.innerHTML = `
-        <div class="dispatch-address">${activeDispatch.site_address}</div>
-        ${activeDispatch.notes ? `<div class="dispatch-notes">${activeDispatch.notes}</div>` : ''}
+        <div class="dispatch-address">${escapeHtml(activeDispatch.site_address)}</div>
+        ${activeDispatch.notes ? `<div class="dispatch-notes">${escapeHtml(activeDispatch.notes)}</div>` : ''}
       `
       dirBtn.disabled = false
       completeBtn.style.display = 'block'

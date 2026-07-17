@@ -6,6 +6,7 @@
   <title>Cooney's Trucking — Dispatch</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#15161a">
+  <link rel="stylesheet" href="theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -22,9 +23,13 @@
       position: sticky;
       top: 0;
       z-index: 100;
+      flex-wrap: wrap;
+      row-gap: 10px;
     }
-    .header-logo { font-size: 16px; font-weight: 900; color: #ff6a1a; letter-spacing: 1px; }
-    .header-right { display: flex; gap: 8px; }
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-img { height: 34px; width: auto; display: block; }
+    .header-logo { font-size: 16px; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
+    .header-right { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .btn-nav {
       background: rgba(255,255,255,0.1);
       color: #fff;
@@ -59,7 +64,7 @@
       display: block;
       width: 4px;
       height: 18px;
-      background: #ff6a1a;
+      background: var(--brand-blue);
       border-radius: 2px;
     }
     .field { margin-bottom: 14px; }
@@ -84,13 +89,13 @@
       transition: border-color 0.2s;
       background: #fff;
     }
-    .field input:focus, .field textarea:focus, .field select:focus { border-color: #ff6a1a; }
+    .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--brand-blue); }
     .field textarea { resize: vertical; min-height: 70px; }
     .address-row { display: flex; gap: 8px; }
     .address-row input { flex: 1; }
     .btn-geocode {
-      background: #15161a;
-      color: #ff6a1a;
+      background: var(--brand-blue);
+      color: #ffffff;
       border: none;
       border-radius: 10px;
       padding: 0 16px;
@@ -106,8 +111,8 @@
 
     .btn-submit {
       width: 100%;
-      background: #ff6a1a;
-      color: #15161a;
+      background: var(--brand-blue);
+      color: #ffffff;
       border: none;
       border-radius: 12px;
       padding: 18px;
@@ -141,8 +146,8 @@
     }
     .dispatch-item:last-child { border-bottom: none; }
     .dispatch-unit {
-      background: #15161a;
-      color: #ff6a1a;
+      background: var(--brand-blue);
+      color: #ffffff;
       font-size: 11px;
       font-weight: 800;
       padding: 4px 8px;
@@ -150,7 +155,7 @@
       flex-shrink: 0;
     }
     .dispatch-info { flex: 1; min-width: 0; }
-    .dispatch-info .addr { font-size: 13px; font-weight: 600; color: #15161a; }
+    .dispatch-info .addr { font-size: 13px; font-weight: 600; color: #15161a; overflow-wrap: anywhere; }
     .dispatch-info .meta { font-size: 11px; color: #9aa0a6; }
     .btn-cancel {
       background: none;
@@ -169,8 +174,12 @@
 <body>
 
   <div class="header">
-    <div class="header-logo">COONEY'S DISPATCH</div>
+    <div class="header-left">
+      <img src="logo.png" alt="Cooney's" class="header-img" width="51" height="34">
+      <div class="header-logo">DISPATCH</div>
+    </div>
     <div class="header-right">
+      <a href="employees.html" class="btn-nav">Employees</a>
       <a href="map.html" class="btn-nav">📍 Live Map</a>
       <button class="btn-nav" onclick="signOut()">Sign Out</button>
     </div>
@@ -182,14 +191,14 @@
       <div class="card-title">Send Dispatch</div>
 
       <div class="field">
-        <label>Driver / Unit</label>
+        <label for="driverSelect">Driver / Unit</label>
         <select id="driverSelect">
           <option value="">Loading drivers...</option>
         </select>
       </div>
 
       <div class="field">
-        <label>Site Address</label>
+        <label for="siteAddress">Site Address</label>
         <div class="address-row">
           <input type="text" id="siteAddress" placeholder="e.g. 123 Main St SW, Calgary, AB">
           <button class="btn-geocode" id="geocodeBtn" onclick="geocodeAddress()">Find 📍</button>
@@ -199,7 +208,7 @@
       </div>
 
       <div class="field">
-        <label>Notes (optional)</label>
+        <label for="notes">Notes (optional)</label>
         <textarea id="notes" placeholder="Load type, contact on site, special instructions..."></textarea>
       </div>
 
@@ -223,11 +232,13 @@
     let geocodedLng = null
     let driverMap = {}
 
+    function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
     sb.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { window.location.href = 'index.html'; return }
       currentUser = session.user
       const { data: profile } = await sb.from('profiles').select('role').eq('id', session.user.id).single()
-      if (profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
+      if (profile?.role !== 'admin' && profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
       loadDrivers()
       loadActiveDispatches()
       setInterval(loadActiveDispatches, 20000)
@@ -242,7 +253,7 @@
       }
       driverMap = {}
       data.forEach(d => { driverMap[d.id] = d })
-      select.innerHTML = data.map(d => `<option value="${d.id}">Unit ${d.unit_number || '—'} — ${d.full_name}</option>`).join('')
+      select.innerHTML = data.map(d => `<option value="${escapeHtml(d.id)}">Unit ${escapeHtml(d.unit_number || '—')} — ${escapeHtml(d.full_name)}</option>`).join('')
     }
 
     async function geocodeAddress() {
@@ -346,12 +357,12 @@
         const timeStr = new Date(d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         return `
           <div class="dispatch-item">
-            <span class="dispatch-unit">U${unit}</span>
+            <span class="dispatch-unit">U${escapeHtml(unit)}</span>
             <div class="dispatch-info">
-              <div class="addr">${d.site_address}</div>
-              <div class="meta">${name} · sent ${timeStr}</div>
+              <div class="addr">${escapeHtml(d.site_address)}</div>
+              <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
             </div>
-            <button class="btn-cancel" onclick="cancelDispatch('${d.id}')">Cancel</button>
+            <button class="btn-cancel" onclick="cancelDispatch('${escapeHtml(d.id)}')">Cancel</button>
           </div>
         `
       }).join('')

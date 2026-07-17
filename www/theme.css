@@ -1,0 +1,17 @@
+/* Cooney's Trucking — brand tokens (single source of truth).
+   Real royal-blue identity sampled from cooneystrucking.com (#004AAD).
+   The dark app shell (#15161a) is intentional; only ACCENTS are blue.
+   Contract: the :root variables below. Consume them via var(--name);
+   never hardcode a brand hex in a page's inline <style>. */
+:root {
+  --brand-blue: #004AAD;        /* primary brand accent */
+  --brand-blue-hover: #003a87;  /* pressed / active state */
+  --ink: #15161a;               /* dark shell / primary text */
+  --charcoal: #2D2727;          /* secondary dark neutral */
+  --paper: #ffffff;             /* card / surface white */
+  --muted: #6c757d;             /* muted labels */
+}
+
+/* Royal blue is DARK: when it is a BACKGROUND, put white text on it.
+   Convenience helper for that pairing. */
+.on-blue { background: var(--brand-blue); color: #ffffff; }

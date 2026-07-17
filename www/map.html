@@ -7,6 +7,7 @@
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#15161a">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -26,9 +27,12 @@
       top: 0;
       z-index: 1000;
       flex-shrink: 0;
+      flex-wrap: wrap;
+      row-gap: 10px;
     }
     .header-left { display: flex; align-items: center; gap: 10px; }
-    .header-logo { font-size: 16px; font-weight: 900; color: #ff6a1a; letter-spacing: 1px; }
+    .header-img { height: 34px; width: auto; display: block; }
+    .header-logo { font-size: 16px; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
     .live-badge {
       background: #22c55e;
       color: #fff;
@@ -41,7 +45,7 @@
       animation: blink 2s infinite;
     }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .header-right { display: flex; align-items: center; gap: 8px; }
+    .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .btn-back {
       background: rgba(255,255,255,0.1);
       color: #fff;
@@ -84,11 +88,12 @@
 
   <div class="header">
     <div class="header-left">
-      <div class="header-logo">COONEY'S</div>
+      <img src="logo.png" alt="Cooney's" class="header-img" width="51" height="34">
       <span class="live-badge">Live</span>
     </div>
     <div class="header-right">
       <span class="refresh-info" id="refreshInfo">—</span>
+      <a href="employees.html" class="btn-back">Employees</a>
       <a href="dispatcher.html" class="btn-back">← Dispatch</a>
     </div>
   </div>
@@ -105,10 +110,12 @@
     let map = null
     let markers = {}
 
+    function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
     sb.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { window.location.href = 'index.html'; return }
       const { data: profile } = await sb.from('profiles').select('role').eq('id', session.user.id).single()
-      if (profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
+      if (profile?.role !== 'admin' && profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
       initMap()
       loadLocations()
       setInterval(loadLocations, 15000)
@@ -178,12 +185,12 @@
 
         const icon = L.divIcon({
           className: '',
-          html: `<div style="background:#15161a;color:#ff6a1a;border:3px solid #ff6a1a;border-radius:50% 50% 50% 0;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4)"><span style="transform:rotate(45deg)">${unit}</span></div>`,
+          html: `<div style="background:var(--brand-blue);color:#ffffff;border:3px solid #ffffff;border-radius:50% 50% 50% 0;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4)"><span style="transform:rotate(45deg)">${escapeHtml(unit)}</span></div>`,
           iconSize: [38, 38],
           iconAnchor: [8, 38]
         })
 
-        const popup = `<b>Unit ${unit}</b> — ${name}<br>Last update: ${timeStr}${speedStr}<br>±${Math.round(loc.accuracy || 0)}m accuracy`
+        const popup = `<b>Unit ${escapeHtml(unit)}</b> — ${escapeHtml(name)}<br>Last update: ${timeStr}${speedStr}<br>±${Math.round(loc.accuracy || 0)}m accuracy`
 
         if (markers[uid]) {
           markers[uid].setLatLng([lat, lng])
@@ -217,7 +224,7 @@
           const timeStr = lastSeen.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           return `<div class="roster-chip">
             <div class="dot${active ? '' : ' offline'}"></div>
-            Unit ${unit} — ${name}
+            Unit ${escapeHtml(unit)} — ${escapeHtml(name)}
             <span class="time">${active ? 'Live' : timeStr}</span>
           </div>`
         }).join('')
