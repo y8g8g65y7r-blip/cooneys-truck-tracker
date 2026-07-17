@@ -3,24 +3,28 @@
 -- Run this in: Supabase Dashboard → SQL Editor → New Query
 -- ============================================================
 
--- 1. PROFILES TABLE (drivers + dispatchers)
+-- 1. PROFILES TABLE (drivers + admins)
 create table public.profiles (
   id uuid references auth.users on delete cascade primary key,
   full_name text not null,
   unit_number text,
-  role text not null default 'driver' check (role in ('driver', 'dispatcher'))
+  role text not null default 'driver' check (role in ('driver', 'admin')),
+  employment_type text not null default 'staff' check (employment_type in ('staff', 'contractor')),
+  active boolean not null default true
 );
 
 -- 2. AUTO-CREATE PROFILE ON SIGNUP
+--    role + employment_type are read from user metadata with safe defaults.
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, full_name, unit_number, role)
+  insert into public.profiles (id, full_name, unit_number, role, employment_type)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', new.email),
     new.raw_user_meta_data->>'unit_number',
-    'driver'
+    coalesce(new.raw_user_meta_data->>'role', 'driver'),
+    coalesce(new.raw_user_meta_data->>'employment_type', 'staff')
   );
   return new;
 end;
@@ -71,44 +75,44 @@ alter table public.profiles enable row level security;
 alter table public.location_updates enable row level security;
 alter table public.dispatches enable row level security;
 
--- Profiles: everyone can see their own; dispatchers see all
+-- Profiles: everyone can see their own; admins see all
 create policy "Users view own profile" on public.profiles
   for select using (auth.uid() = id);
 
-create policy "Dispatchers view all profiles" on public.profiles
-  for select using (public.get_my_role() = 'dispatcher');
+create policy "Admins view all profiles" on public.profiles
+  for select using (public.get_my_role() = 'admin');
 
 create policy "Users update own profile" on public.profiles
   for update using (auth.uid() = id);
 
-create policy "Dispatchers update all profiles" on public.profiles
-  for update using (public.get_my_role() = 'dispatcher');
+create policy "Admins update all profiles" on public.profiles
+  for update using (public.get_my_role() = 'admin');
 
--- Location updates: drivers insert/view their own; dispatchers view all
+-- Location updates: drivers insert/view their own; admins view all
 create policy "Drivers insert own location" on public.location_updates
   for insert with check (auth.uid() = user_id);
 
 create policy "Drivers view own location" on public.location_updates
   for select using (auth.uid() = user_id);
 
-create policy "Dispatchers view all locations" on public.location_updates
-  for select using (public.get_my_role() = 'dispatcher');
+create policy "Admins view all locations" on public.location_updates
+  for select using (public.get_my_role() = 'admin');
 
--- Dispatches: drivers view/update (status) their own; dispatchers manage all
+-- Dispatches: drivers view/update (status) their own; admins manage all
 create policy "Drivers view own dispatches" on public.dispatches
   for select using (auth.uid() = driver_id);
 
 create policy "Drivers update own dispatch status" on public.dispatches
   for update using (auth.uid() = driver_id);
 
-create policy "Dispatchers view all dispatches" on public.dispatches
-  for select using (public.get_my_role() = 'dispatcher');
+create policy "Admins view all dispatches" on public.dispatches
+  for select using (public.get_my_role() = 'admin');
 
-create policy "Dispatchers insert dispatches" on public.dispatches
-  for insert with check (public.get_my_role() = 'dispatcher');
+create policy "Admins insert dispatches" on public.dispatches
+  for insert with check (public.get_my_role() = 'admin');
 
-create policy "Dispatchers update all dispatches" on public.dispatches
-  for update using (public.get_my_role() = 'dispatcher');
+create policy "Admins update all dispatches" on public.dispatches
+  for update using (public.get_my_role() = 'admin');
 
 -- ============================================================
 -- AFTER RUNNING THE ABOVE:
@@ -121,8 +125,8 @@ create policy "Dispatchers update all dispatches" on public.dispatches
 --      RJ (Ranjeet Sandhu) — RanjeetGrewal32@gmail.com — unit 55
 --      Antoine Filiatrault — AntoineFiliatraultc@gmail.com — unit 36
 --
--- 2. To make someone a dispatcher (e.g. Kale or Dario), run:
---    UPDATE public.profiles SET role = 'dispatcher' WHERE full_name = 'Kale';
+-- 2. To make someone an admin (e.g. Kale or Dario), run:
+--    UPDATE public.profiles SET role = 'admin' WHERE full_name = 'Kale';
 --
 -- 3. Put your Project URL and anon key into config.js
 -- ============================================================
