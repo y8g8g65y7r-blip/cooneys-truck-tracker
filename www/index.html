@@ -32,7 +32,7 @@
     .logo-top {
       font-size: 36px;
       font-weight: 900;
-      color: var(--brand-blue);
+      color: #ffffff;
       letter-spacing: 1px;
       line-height: 1;
     }
@@ -111,8 +111,8 @@
 
     .btn-primary {
       width: 100%;
-      background: #15161a;
-      color: var(--brand-blue);
+      background: var(--brand-blue);
+      color: #ffffff;
       border: none;
       border-radius: 10px;
       padding: 17px;
@@ -125,8 +125,8 @@
       transition: all 0.2s;
     }
 
-    .btn-primary:hover { background: #24262e; }
-    .btn-primary:active { background: var(--brand-blue); color: #ffffff; }
+    .btn-primary:hover { background: var(--brand-blue-hover); color: #ffffff; }
+    .btn-primary:active { background: var(--brand-blue-hover); color: #ffffff; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .error {
@@ -153,11 +153,11 @@
     <h2>Sign In</h2>
     <div class="error" id="error"></div>
     <div class="field">
-      <label>Email Address</label>
+      <label for="email">Email Address</label>
       <input type="email" id="email" placeholder="name@email.com" autocomplete="email">
     </div>
     <div class="field">
-      <label>Password</label>
+      <label for="password">Password</label>
       <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
     </div>
     <button class="btn-primary" id="loginBtn" onclick="login()">Sign In</button>

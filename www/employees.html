@@ -23,11 +23,13 @@
       position: sticky;
       top: 0;
       z-index: 100;
+      flex-wrap: wrap;
+      row-gap: 10px;
     }
     .header-left { display: flex; align-items: center; gap: 10px; }
     .header-img { height: 34px; width: auto; display: block; }
-    .header-logo { font-size: 16px; font-weight: 900; color: var(--brand-blue); letter-spacing: 1px; }
-    .header-right { display: flex; gap: 8px; }
+    .header-logo { font-size: 16px; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
+    .header-right { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .btn-nav {
       background: rgba(255,255,255,0.1);
       color: #fff;
@@ -91,8 +93,8 @@
     .pw-row { display: flex; gap: 8px; }
     .pw-row input { flex: 1; }
     .btn-generate {
-      background: #15161a;
-      color: var(--brand-blue);
+      background: var(--brand-blue);
+      color: #ffffff;
       border: none;
       border-radius: 10px;
       padding: 0 16px;
@@ -167,8 +169,8 @@
     .emp-item.inactive { opacity: 0.5; }
     .emp-main { display: flex; align-items: center; gap: 10px; }
     .emp-unit {
-      background: #15161a;
-      color: var(--brand-blue);
+      background: var(--brand-blue);
+      color: #ffffff;
       font-size: 11px;
       font-weight: 800;
       padding: 4px 8px;
@@ -235,22 +237,22 @@
       <div class="card-title">Add Employee</div>
 
       <div class="field">
-        <label>Full Name</label>
+        <label for="empName">Full Name</label>
         <input type="text" id="empName" placeholder="e.g. Dave Cooney" autocomplete="off">
       </div>
 
       <div class="field">
-        <label>Email</label>
+        <label for="empEmail">Email</label>
         <input type="email" id="empEmail" placeholder="driver@example.com" autocomplete="off">
       </div>
 
       <div class="field">
-        <label>Unit Number</label>
+        <label for="empUnit">Unit Number</label>
         <input type="text" id="empUnit" placeholder="e.g. 12" autocomplete="off">
       </div>
 
       <div class="field">
-        <label>Employment Type</label>
+        <label for="empType">Employment Type</label>
         <select id="empType">
           <option value="staff">Staff</option>
           <option value="contractor">Contractor</option>
@@ -258,7 +260,7 @@
       </div>
 
       <div class="field">
-        <label>Temp Password</label>
+        <label for="empPassword">Temp Password</label>
         <div class="pw-row">
           <input type="text" id="empPassword" placeholder="Set a temporary password" autocomplete="off">
           <button class="btn-generate" type="button" onclick="generatePassword()">Generate</button>
@@ -307,8 +309,15 @@
     }
 
     function generatePassword() {
-      const n = Math.floor(1000 + Math.random() * 9000)
-      document.getElementById('empPassword').value = 'Cooney' + n
+      // Cryptographically-random, human-typable temp password.
+      // Unambiguous character set (no 0/O/1/I/l) so it reads cleanly on handoff.
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+      const len = 10
+      const buf = new Uint32Array(len)
+      crypto.getRandomValues(buf)
+      let pw = ''
+      for (let i = 0; i < len; i++) pw += chars[buf[i] % chars.length]
+      document.getElementById('empPassword').value = pw
     }
 
     async function addEmployee() {
@@ -406,8 +415,8 @@
               ${active ? '' : '<span class="inactive-tag">Inactive</span>'}
             </div>
             <div class="emp-controls">
-              <button class="btn-row" onclick="toggleType('${d.id}', '${type}')">${isContractor ? 'Make Staff' : 'Make Contractor'}</button>
-              <button class="btn-row ${active ? 'danger' : 'go'}" onclick="toggleActive('${d.id}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
+              <button class="btn-row" onclick="toggleType('${escapeHtml(d.id)}', '${escapeHtml(type)}')">${isContractor ? 'Make Staff' : 'Make Contractor'}</button>
+              <button class="btn-row ${active ? 'danger' : 'go'}" onclick="toggleActive('${escapeHtml(d.id)}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
             </div>
           </div>
         `

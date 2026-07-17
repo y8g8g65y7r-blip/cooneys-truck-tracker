@@ -23,11 +23,13 @@
       position: sticky;
       top: 0;
       z-index: 100;
+      flex-wrap: wrap;
+      row-gap: 10px;
     }
     .header-left { display: flex; align-items: center; gap: 10px; }
     .header-img { height: 34px; width: auto; display: block; }
-    .header-logo { font-size: 16px; font-weight: 900; color: var(--brand-blue); letter-spacing: 1px; }
-    .header-right { display: flex; gap: 8px; }
+    .header-logo { font-size: 16px; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
+    .header-right { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .btn-nav {
       background: rgba(255,255,255,0.1);
       color: #fff;
@@ -92,8 +94,8 @@
     .address-row { display: flex; gap: 8px; }
     .address-row input { flex: 1; }
     .btn-geocode {
-      background: #15161a;
-      color: var(--brand-blue);
+      background: var(--brand-blue);
+      color: #ffffff;
       border: none;
       border-radius: 10px;
       padding: 0 16px;
@@ -144,8 +146,8 @@
     }
     .dispatch-item:last-child { border-bottom: none; }
     .dispatch-unit {
-      background: #15161a;
-      color: var(--brand-blue);
+      background: var(--brand-blue);
+      color: #ffffff;
       font-size: 11px;
       font-weight: 800;
       padding: 4px 8px;
@@ -153,7 +155,7 @@
       flex-shrink: 0;
     }
     .dispatch-info { flex: 1; min-width: 0; }
-    .dispatch-info .addr { font-size: 13px; font-weight: 600; color: #15161a; }
+    .dispatch-info .addr { font-size: 13px; font-weight: 600; color: #15161a; overflow-wrap: anywhere; }
     .dispatch-info .meta { font-size: 11px; color: #9aa0a6; }
     .btn-cancel {
       background: none;
@@ -189,14 +191,14 @@
       <div class="card-title">Send Dispatch</div>
 
       <div class="field">
-        <label>Driver / Unit</label>
+        <label for="driverSelect">Driver / Unit</label>
         <select id="driverSelect">
           <option value="">Loading drivers...</option>
         </select>
       </div>
 
       <div class="field">
-        <label>Site Address</label>
+        <label for="siteAddress">Site Address</label>
         <div class="address-row">
           <input type="text" id="siteAddress" placeholder="e.g. 123 Main St SW, Calgary, AB">
           <button class="btn-geocode" id="geocodeBtn" onclick="geocodeAddress()">Find 📍</button>
@@ -206,7 +208,7 @@
       </div>
 
       <div class="field">
-        <label>Notes (optional)</label>
+        <label for="notes">Notes (optional)</label>
         <textarea id="notes" placeholder="Load type, contact on site, special instructions..."></textarea>
       </div>
 
@@ -230,6 +232,8 @@
     let geocodedLng = null
     let driverMap = {}
 
+    function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
     sb.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { window.location.href = 'index.html'; return }
       currentUser = session.user
@@ -249,7 +253,7 @@
       }
       driverMap = {}
       data.forEach(d => { driverMap[d.id] = d })
-      select.innerHTML = data.map(d => `<option value="${d.id}">Unit ${d.unit_number || '—'} — ${d.full_name}</option>`).join('')
+      select.innerHTML = data.map(d => `<option value="${escapeHtml(d.id)}">Unit ${escapeHtml(d.unit_number || '—')} — ${escapeHtml(d.full_name)}</option>`).join('')
     }
 
     async function geocodeAddress() {
@@ -353,12 +357,12 @@
         const timeStr = new Date(d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         return `
           <div class="dispatch-item">
-            <span class="dispatch-unit">U${unit}</span>
+            <span class="dispatch-unit">U${escapeHtml(unit)}</span>
             <div class="dispatch-info">
-              <div class="addr">${d.site_address}</div>
-              <div class="meta">${name} · sent ${timeStr}</div>
+              <div class="addr">${escapeHtml(d.site_address)}</div>
+              <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
             </div>
-            <button class="btn-cancel" onclick="cancelDispatch('${d.id}')">Cancel</button>
+            <button class="btn-cancel" onclick="cancelDispatch('${escapeHtml(d.id)}')">Cancel</button>
           </div>
         `
       }).join('')
