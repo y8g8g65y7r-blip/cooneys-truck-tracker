@@ -43,6 +43,7 @@ workflows:
       groups:
         - appstore_credentials
       vars:
+        BUNDLE_ID: "com.cooneystrucking.trucktracker"
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
       node: latest
