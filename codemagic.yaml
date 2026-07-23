@@ -56,7 +56,10 @@ workflows:
         script: |
           keychain initialize
           echo $CM_CERTIFICATE | base64 --decode > $CM_BUILD_DIR/ios_cert.p12
-          keychain add-certificates --certificate "$CM_BUILD_DIR/ios_cert.p12" --certificate-password "$CM_CERTIFICATE_PASSWORD"
+          KEYCHAIN_PATH=$(security default-keychain | tr -d ' "')
+          echo "Using keychain: $KEYCHAIN_PATH"
+          security import "$CM_BUILD_DIR/ios_cert.p12" -k "$KEYCHAIN_PATH" -P "$CM_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security -A
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_ADHOC --create
           xcode-project use-profiles
       - name: Build ipa for ad hoc distribution
