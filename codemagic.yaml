@@ -37,9 +37,6 @@ workflows:
     name: iOS Ad Hoc Build
     max_build_duration: 60
     environment:
-      ios_signing:
-        distribution_type: ad_hoc
-        bundle_identifier: com.cooneystrucking.trucktracker
       groups:
         - appstore_credentials
       vars:
