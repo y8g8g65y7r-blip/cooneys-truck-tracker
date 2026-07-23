@@ -55,7 +55,7 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-          keychain add-certificates
+          keychain add-certificates --certificate @env:CM_CERTIFICATE --certificate-password @env:CM_CERTIFICATE_PASSWORD
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_ADHOC --create
           xcode-project use-profiles
       - name: Build ipa for ad hoc distribution
