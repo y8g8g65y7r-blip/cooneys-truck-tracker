@@ -56,6 +56,9 @@ function pemToPkcs8(pem: string): ArrayBuffer {
   const clean = pem
     .replace(/-----BEGIN PRIVATE KEY-----/, '')
     .replace(/-----END PRIVATE KEY-----/, '')
+    // Secrets can arrive with either real newlines or literal "\n" escapes
+    // depending on how they were set (CLI arg vs --env-file), so strip both.
+    .replace(/\\n/g, '')
     .replace(/\s+/g, '')
   const binary = atob(clean)
   const bytes = new Uint8Array(binary.length)
