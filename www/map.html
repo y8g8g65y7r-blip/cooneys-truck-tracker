@@ -129,13 +129,27 @@
       }).addTo(map)
     }
 
+    const LIVE_MS = 5 * 60 * 1000 // pinged within 5 min = "Live"
+
+    function relTime(ms) {
+      const m = Math.round(ms / 60000)
+      if (m < 1) return 'just now'
+      if (m < 60) return m + ' min ago'
+      const h = Math.round(m / 60)
+      return h + (h === 1 ? ' hr ago' : ' hrs ago')
+    }
+
     async function loadLocations() {
-      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+      // Show each driver's LAST KNOWN location from the last 24h, so a parked or
+      // paused truck (the native app only pings when it moves ~40m) stays on the
+      // map at its last spot instead of vanishing after 5 minutes. Freshness is
+      // shown by colour: live = brand blue, stale = grey.
+      const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
       const [{ data: locData }, { data: profileData }] = await Promise.all([
         sb.from('location_updates')
           .select('*')
-          .gte('created_at', fiveMinAgo)
+          .gte('created_at', dayAgo)
           .order('created_at', { ascending: false }),
         sb.from('profiles').select('id, full_name, unit_number').eq('role', 'driver')
       ])
@@ -143,85 +157,70 @@
       const profileMap = {}
       profileData?.forEach(p => { profileMap[p.id] = p })
 
-      // Latest location per driver
+      // Latest location per driver within the window.
       const latestByUser = {}
       ;(locData || []).forEach(loc => {
         if (!latestByUser[loc.user_id]) latestByUser[loc.user_id] = loc
       })
 
-      // All drivers who've pinged in the last 24h, for the roster strip
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-      const { data: recentData } = await sb.from('location_updates')
-        .select('user_id, created_at')
-        .gte('created_at', oneDayAgo)
-        .order('created_at', { ascending: false })
+      const shownIds = new Set(Object.keys(latestByUser))
+      const now = Date.now()
 
-      const recentByUser = {}
-      ;(recentData || []).forEach(loc => {
-        if (!recentByUser[loc.user_id]) recentByUser[loc.user_id] = loc
-      })
-
-      const activeIds = new Set(Object.keys(latestByUser))
-
-      // Remove stale markers
+      // Remove markers for drivers with no ping in the last 24h.
       Object.keys(markers).forEach(uid => {
-        if (!activeIds.has(uid)) {
-          map.removeLayer(markers[uid])
-          delete markers[uid]
-        }
+        if (!shownIds.has(uid)) { map.removeLayer(markers[uid]); delete markers[uid] }
       })
 
-      // Add/update markers
       const bounds = []
-      activeIds.forEach(uid => {
+      shownIds.forEach(uid => {
         const loc = latestByUser[uid]
         const profile = profileMap[uid]
         const unit = profile?.unit_number || '?'
         const name = profile?.full_name || 'Unknown'
         const lat = parseFloat(loc.lat)
         const lng = parseFloat(loc.lng)
+        const ageMs = now - new Date(loc.created_at).getTime()
+        const isLive = ageMs < LIVE_MS
+        const color = isLive ? 'var(--brand-blue)' : '#6c757d'
         const timeStr = new Date(loc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         const speedStr = loc.speed != null ? ` · ${Math.round(loc.speed * 3.6)} km/h` : ''
+        const freshStr = isLive ? 'Live now' : 'Last seen ' + relTime(ageMs)
 
         const icon = L.divIcon({
           className: '',
-          html: `<div style="background:var(--brand-blue);color:#ffffff;border:3px solid #ffffff;border-radius:50% 50% 50% 0;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4)"><span style="transform:rotate(45deg)">${escapeHtml(unit)}</span></div>`,
+          html: `<div style="background:${color};color:#ffffff;border:3px solid #ffffff;border-radius:50% 50% 50% 0;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4);${isLive ? '' : 'opacity:0.7'}"><span style="transform:rotate(45deg)">${escapeHtml(unit)}</span></div>`,
           iconSize: [38, 38],
           iconAnchor: [8, 38]
         })
 
-        const popup = `<b>Unit ${escapeHtml(unit)}</b> — ${escapeHtml(name)}<br>Last update: ${timeStr}${speedStr}<br>±${Math.round(loc.accuracy || 0)}m accuracy`
+        const popup = `<b>Unit ${escapeHtml(unit)}</b> — ${escapeHtml(name)}<br>${freshStr} (${timeStr})${speedStr}<br>±${Math.round(loc.accuracy || 0)}m accuracy`
 
         if (markers[uid]) {
           markers[uid].setLatLng([lat, lng])
           markers[uid].setPopupContent(popup)
+          markers[uid].setIcon(icon)
         } else {
           markers[uid] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup)
         }
         bounds.push([lat, lng])
       })
 
-      if (bounds.length > 0) {
-        if (bounds.length === 1) {
-          map.setView(bounds[0], 14)
-        } else {
-          map.fitBounds(bounds, { padding: [40, 40] })
-        }
-      }
+      if (bounds.length === 1) map.setView(bounds[0], 14)
+      else if (bounds.length > 1) map.fitBounds(bounds, { padding: [40, 40] })
 
-      // Roster strip
+      // Roster strip — same set; Live if pinged within 5 min, else last-seen time.
       const roster = document.getElementById('roster')
-      const rosterUsers = Object.keys(recentByUser)
+      const rosterUsers = Object.keys(latestByUser)
       if (rosterUsers.length === 0) {
         roster.innerHTML = '<span style="color:rgba(255,255,255,0.3);font-size:12px;">No trucks have tracked today</span>'
       } else {
         roster.innerHTML = rosterUsers.map(uid => {
-          const active = activeIds.has(uid)
+          const loc = latestByUser[uid]
+          const active = (now - new Date(loc.created_at).getTime()) < LIVE_MS
           const profile = profileMap[uid]
           const unit = profile?.unit_number || '?'
           const name = profile?.full_name || 'Unknown'
-          const lastSeen = new Date(recentByUser[uid].created_at)
-          const timeStr = lastSeen.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          const timeStr = new Date(loc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           return `<div class="roster-chip">
             <div class="dot${active ? '' : ' offline'}"></div>
             Unit ${escapeHtml(unit)} — ${escapeHtml(name)}
