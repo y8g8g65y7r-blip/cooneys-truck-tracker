@@ -189,6 +189,9 @@
     }
     .chip.staff { background: #eef2ff; color: var(--brand-blue); }
     .chip.contractor { background: #fff4e5; color: #b45309; }
+    .chip.admin { background: #15161a; color: #ffffff; }
+    .emp-unit.admin { background: #15161a; }
+    .btn-row.promote { border-color: var(--brand-blue); color: var(--brand-blue); }
     .inactive-tag {
       background: #fef2f2;
       color: #dc2626;
@@ -199,7 +202,7 @@
       letter-spacing: 1px;
       flex-shrink: 0;
     }
-    .emp-controls { display: flex; gap: 8px; margin-top: 10px; }
+    .emp-controls { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
     .btn-row {
       background: #f4f5f7;
       border: 1px solid #e2e8f0;
@@ -243,15 +246,23 @@
 
       <div class="field">
         <label for="empEmail">Email</label>
-        <input type="email" id="empEmail" placeholder="driver@example.com" autocomplete="off">
+        <input type="email" id="empEmail" placeholder="name@example.com" autocomplete="off">
       </div>
 
       <div class="field">
+        <label for="empRole">Role</label>
+        <select id="empRole" onchange="onRoleChange()">
+          <option value="driver">Driver</option>
+          <option value="admin">Admin (can manage everyone)</option>
+        </select>
+      </div>
+
+      <div class="field" id="unitField">
         <label for="empUnit">Unit Number</label>
         <input type="text" id="empUnit" placeholder="e.g. 12" autocomplete="off">
       </div>
 
-      <div class="field">
+      <div class="field" id="typeField">
         <label for="empType">Employment Type</label>
         <select id="empType">
           <option value="staff">Staff</option>
@@ -271,8 +282,9 @@
       <div class="add-error" id="addError"></div>
 
       <div class="cred-panel" id="credPanel">
-        <div class="cred-title">✓ Employee added — temp login</div>
+        <div class="cred-title">✓ Added — temp login</div>
         <div class="cred-row"><span class="lbl">Email</span><b id="credEmail"></b></div>
+        <div class="cred-row"><span class="lbl">Role</span><b id="credRole"></b></div>
         <div class="cred-row"><span class="lbl">Password</span><b id="credPassword"></b></div>
         <div class="cred-note">Give these to the employee; they can change the password after first sign-in. This password is shown once.</div>
       </div>
@@ -323,6 +335,7 @@
     async function addEmployee() {
       const full_name = document.getElementById('empName').value.trim()
       const email = document.getElementById('empEmail').value.trim()
+      const role = document.getElementById('empRole').value
       const unit_number = document.getElementById('empUnit').value.trim()
       const employment_type = document.getElementById('empType').value
       const password = document.getElementById('empPassword').value
@@ -330,8 +343,11 @@
       const errEl = document.getElementById('addError')
       errEl.style.display = 'none'
 
-      if (!full_name || !email || !unit_number || !password) {
-        errEl.textContent = '⚠ Please fill in name, email, unit number and a temp password.'
+      // Unit number is required for drivers only; admins don't drive a unit.
+      if (!full_name || !email || !password || (role === 'driver' && !unit_number)) {
+        errEl.textContent = role === 'driver'
+          ? '⚠ Please fill in name, email, unit number and a temp password.'
+          : '⚠ Please fill in name, email and a temp password.'
         errEl.style.display = 'block'
         return
       }
@@ -342,7 +358,7 @@
       document.getElementById('credPanel').classList.remove('show')
 
       const { data, error } = await sb.functions.invoke('admin-create-employee', {
-        body: { full_name, email, unit_number, employment_type, password }
+        body: { full_name, email, unit_number, employment_type, password, role }
       })
 
       // Two distinct failure paths, both treated as failure:
@@ -368,15 +384,18 @@
 
       // Success — show the credentials ONCE for handoff.
       document.getElementById('credEmail').textContent = email
+      document.getElementById('credRole').textContent = (data?.role === 'admin') ? 'Admin' : 'Driver'
       document.getElementById('credPassword').textContent = password
       document.getElementById('credPanel').classList.add('show')
 
       // Clear the form.
       document.getElementById('empName').value = ''
       document.getElementById('empEmail').value = ''
+      document.getElementById('empRole').value = 'driver'
       document.getElementById('empUnit').value = ''
       document.getElementById('empType').value = 'staff'
       document.getElementById('empPassword').value = ''
+      onRoleChange()
 
       btn.disabled = false
       btn.textContent = 'Add Employee'
@@ -384,10 +403,18 @@
       loadRoster()
     }
 
+    // Hide the driver-only fields (unit + employment type) when creating an Admin.
+    function onRoleChange() {
+      const isAdmin = document.getElementById('empRole').value === 'admin'
+      document.getElementById('unitField').style.display = isAdmin ? 'none' : ''
+      document.getElementById('typeField').style.display = isAdmin ? 'none' : ''
+    }
+
     async function loadRoster() {
+      // Show everyone — admins and drivers — so a newly-added admin is visible.
       const { data, error } = await sb.from('profiles')
-        .select('id, full_name, unit_number, employment_type, active')
-        .eq('role', 'driver')
+        .select('id, full_name, unit_number, employment_type, active, role')
+        .order('role')
         .order('unit_number')
 
       const list = document.getElementById('rosterList')
@@ -397,30 +424,67 @@
         return
       }
       if (!data || data.length === 0) {
-        list.innerHTML = '<div class="empty-state">No employees yet. Add your first driver above.</div>'
+        list.innerHTML = '<div class="empty-state">No one yet. Add your first employee above.</div>'
         return
       }
 
+      const myId = currentUser && currentUser.id
       list.innerHTML = data.map(d => {
+        const isAdmin = d.role === 'admin' || d.role === 'dispatcher'
+        const isSelf = d.id === myId
         const unit = d.unit_number || '—'
         const type = d.employment_type || 'staff'
         const isContractor = type === 'contractor'
         const active = d.active !== false
+
+        const badge = isAdmin
+          ? '<span class="emp-unit admin">ADMIN</span>'
+          : `<span class="emp-unit">U${escapeHtml(unit)}</span>`
+        const chip = isAdmin
+          ? '<span class="chip admin">Admin</span>'
+          : `<span class="chip ${isContractor ? 'contractor' : 'staff'}">${isContractor ? 'Contractor' : 'Staff'}</span>`
+
+        // Controls (id is a server UUID; role tokens are literals — safe to inline)
+        let controls = ''
+        if (isAdmin) {
+          controls += isSelf
+            ? '<span class="btn-row" style="opacity:.5;cursor:default" title="This is your account">You</span>'
+            : `<button class="btn-row danger" onclick="makeRole('${escapeHtml(d.id)}','driver')">Make Driver</button>`
+        } else {
+          controls += `<button class="btn-row promote" onclick="makeRole('${escapeHtml(d.id)}','admin')">Make Admin</button>`
+          controls += `<button class="btn-row" onclick="toggleType('${escapeHtml(d.id)}', '${escapeHtml(type)}')">${isContractor ? 'Make Staff' : 'Make Contractor'}</button>`
+        }
+        if (!isSelf) {
+          controls += `<button class="btn-row ${active ? 'danger' : 'go'}" onclick="toggleActive('${escapeHtml(d.id)}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>`
+        }
+
         return `
           <div class="emp-item${active ? '' : ' inactive'}">
             <div class="emp-main">
-              <span class="emp-unit">U${escapeHtml(unit)}</span>
+              ${badge}
               <span class="emp-name">${escapeHtml(d.full_name || 'Unnamed')}</span>
-              <span class="chip ${isContractor ? 'contractor' : 'staff'}">${isContractor ? 'Contractor' : 'Staff'}</span>
+              ${chip}
               ${active ? '' : '<span class="inactive-tag">Inactive</span>'}
             </div>
-            <div class="emp-controls">
-              <button class="btn-row" onclick="toggleType('${escapeHtml(d.id)}', '${escapeHtml(type)}')">${isContractor ? 'Make Staff' : 'Make Contractor'}</button>
-              <button class="btn-row ${active ? 'danger' : 'go'}" onclick="toggleActive('${escapeHtml(d.id)}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
-            </div>
+            <div class="emp-controls">${controls}</div>
           </div>
         `
       }).join('')
+    }
+
+    // Promote/demote. The "Admins update all profiles" RLS policy + the
+    // protect_profile_privileged_columns trigger (which does NOT clamp an admin
+    // caller) let an admin change another user's role from the client. 'dispatcher'
+    // is the backward-compatible admin value the installed app also recognises.
+    async function makeRole(id, toRole) {
+      const msg = toRole === 'admin'
+        ? 'Make this person an admin? They will be able to see everything and add or remove users.'
+        : 'Remove admin access from this person? They become a driver (own info only).'
+      if (!confirm(msg)) return
+      const roleValue = toRole === 'admin' ? 'dispatcher' : 'driver'
+      const { error } = await sb.from('profiles').update({ role: roleValue }).eq('id', id)
+      if (error) { alert('Could not update: ' + error.message); return }
+      loadRoster()
     }
 
     // Admin RLS ("Admins update all profiles") allows a plain profiles update.
