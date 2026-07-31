@@ -109,6 +109,9 @@
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     let map = null
     let markers = {}
+    let trailLines = {}
+    let dispatchMarkers = {}
+    let routeLines = {}
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -139,6 +142,8 @@
       return h + (h === 1 ? ' hr ago' : ' hrs ago')
     }
 
+    const TRAIL_MS = 3 * 60 * 60 * 1000 // breadcrumb trail covers the last 3h of driving, not the full 24h window
+
     async function loadLocations() {
       // Show each driver's LAST KNOWN location from the last 24h, so a parked or
       // paused truck (the native app only pings when it moves ~40m) stays on the
@@ -146,29 +151,48 @@
       // shown by colour: live = brand blue, stale = grey.
       const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-      const [{ data: locData }, { data: profileData }] = await Promise.all([
+      const [{ data: locData }, { data: profileData }, { data: dispatchData }] = await Promise.all([
         sb.from('location_updates')
           .select('*')
           .gte('created_at', dayAgo)
           .order('created_at', { ascending: false }),
-        sb.from('profiles').select('id, full_name, unit_number').eq('role', 'driver')
+        sb.from('profiles').select('id, full_name, unit_number').eq('role', 'driver'),
+        sb.from('dispatches').select('*').eq('status', 'active')
       ])
 
       const profileMap = {}
       profileData?.forEach(p => { profileMap[p.id] = p })
 
-      // Latest location per driver within the window.
+      // Latest location per driver within the window, plus the recent trail
+      // (last TRAIL_MS) per driver in chronological order for the breadcrumb line.
       const latestByUser = {}
+      const trailByUser = {}
+      const now = Date.now()
       ;(locData || []).forEach(loc => {
         if (!latestByUser[loc.user_id]) latestByUser[loc.user_id] = loc
+        if (now - new Date(loc.created_at).getTime() < TRAIL_MS) {
+          (trailByUser[loc.user_id] = trailByUser[loc.user_id] || []).push(loc)
+        }
       })
+      Object.values(trailByUser).forEach(pts => pts.reverse()) // oldest -> newest for the polyline
 
       const shownIds = new Set(Object.keys(latestByUser))
-      const now = Date.now()
 
-      // Remove markers for drivers with no ping in the last 24h.
+      // Remove markers/trails for drivers with no ping in the last 24h.
       Object.keys(markers).forEach(uid => {
         if (!shownIds.has(uid)) { map.removeLayer(markers[uid]); delete markers[uid] }
+      })
+      Object.keys(trailLines).forEach(uid => {
+        if (!shownIds.has(uid)) { map.removeLayer(trailLines[uid]); delete trailLines[uid] }
+      })
+
+      // Breadcrumb trails — faint brand-blue line through each driver's recent pings.
+      shownIds.forEach(uid => {
+        const pts = (trailByUser[uid] || []).map(p => [parseFloat(p.lat), parseFloat(p.lng)])
+        if (trailLines[uid]) { map.removeLayer(trailLines[uid]); delete trailLines[uid] }
+        if (pts.length > 1) {
+          trailLines[uid] = L.polyline(pts, { color: 'var(--brand-blue)', weight: 3, opacity: 0.35 }).addTo(map)
+        }
       })
 
       const bounds = []
@@ -203,6 +227,54 @@
           markers[uid] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup)
         }
         bounds.push([lat, lng])
+      })
+
+      // Dispatch destination pins — distinct teardrop markers (vs. the trucks'
+      // rotated-square icons) so a dispatcher can see where each active job is
+      // headed. Amber while pending, green once the driver taps Accept. A
+      // dashed line ties the pin back to that driver's current truck position.
+      const activeDispatchIds = new Set()
+      ;(dispatchData || []).forEach(d => {
+        if (d.lat == null || d.lng == null) return
+        activeDispatchIds.add(d.id)
+        const driver = profileMap[d.driver_id]
+        const unit = driver?.unit_number || '?'
+        const name = driver?.full_name || 'Unknown'
+        const accepted = !!d.accepted_at
+        const color = accepted ? '#22c55e' : '#eab308'
+        const lat = parseFloat(d.lat)
+        const lng = parseFloat(d.lng)
+
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="background:${color};color:#ffffff;border:3px solid #ffffff;border-radius:50% 50% 50% 0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:14px;transform:rotate(45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4);"><span style="transform:rotate(-45deg)">🚩</span></div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 32]
+        })
+        const popup = `<b>${accepted ? '✓ Accepted' : 'Pending'}</b> — Unit ${escapeHtml(unit)} (${escapeHtml(name)})<br>${escapeHtml(d.site_address)}${d.notes ? '<br>' + escapeHtml(d.notes) : ''}`
+
+        if (dispatchMarkers[d.id]) {
+          dispatchMarkers[d.id].setIcon(icon)
+          dispatchMarkers[d.id].setPopupContent(popup)
+        } else {
+          dispatchMarkers[d.id] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup)
+        }
+        bounds.push([lat, lng])
+
+        const truckLoc = latestByUser[d.driver_id]
+        if (routeLines[d.id]) { map.removeLayer(routeLines[d.id]); delete routeLines[d.id] }
+        if (truckLoc) {
+          routeLines[d.id] = L.polyline(
+            [[parseFloat(truckLoc.lat), parseFloat(truckLoc.lng)], [lat, lng]],
+            { color, weight: 2, opacity: 0.6, dashArray: '6,8' }
+          ).addTo(map)
+        }
+      })
+      Object.keys(dispatchMarkers).forEach(id => {
+        if (!activeDispatchIds.has(id)) { map.removeLayer(dispatchMarkers[id]); delete dispatchMarkers[id] }
+      })
+      Object.keys(routeLines).forEach(id => {
+        if (!activeDispatchIds.has(id)) { map.removeLayer(routeLines[id]); delete routeLines[id] }
       })
 
       if (bounds.length === 1) map.setView(bounds[0], 14)

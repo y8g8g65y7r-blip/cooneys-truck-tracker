@@ -169,6 +169,37 @@
       flex-shrink: 0;
     }
     .empty-state { color: #9aa0a6; font-size: 13px; text-align: center; padding: 8px 0; }
+
+    .status-pill {
+      font-size: 9.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 3px 7px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+    .status-pill.pending { background: #fef9c3; color: #a16207; }
+    .status-pill.accepted { background: #dcfce7; color: #16a34a; }
+    .dispatch-item.accepted { border-left: 3px solid #22c55e; padding-left: 9px; }
+    .dispatch-item.pending-accept { border-left: 3px solid #eab308; padding-left: 9px; }
+
+    .tab-row { display: flex; gap: 8px; margin-bottom: 14px; }
+    .tab-btn {
+      flex: 1;
+      background: #f4f5f7;
+      border: none;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #6c757d;
+      cursor: pointer;
+    }
+    .tab-btn.active { background: var(--brand-blue); color: #fff; }
+    .history-status { font-size: 10.5px; font-weight: 700; text-transform: uppercase; }
+    .history-status.completed { color: #16a34a; }
+    .history-status.cancelled { color: #ef4444; }
   </style>
 </head>
 <body>
@@ -217,8 +248,12 @@
     </div>
 
     <div class="card">
-      <div class="card-title">Active Dispatches</div>
+      <div class="tab-row">
+        <button class="tab-btn active" id="tabActive" onclick="switchTab('active')">Active</button>
+        <button class="tab-btn" id="tabHistory" onclick="switchTab('history')">History</button>
+      </div>
       <div id="activeList"><div class="empty-state">Loading...</div></div>
+      <div id="historyList" style="display:none;"><div class="empty-state">Loading...</div></div>
     </div>
 
   </div>
@@ -231,6 +266,7 @@
     let geocodedLat = null
     let geocodedLng = null
     let driverMap = {}
+    let historyLoaded = false
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -242,7 +278,55 @@
       loadDrivers()
       loadActiveDispatches()
       setInterval(loadActiveDispatches, 20000)
+
+      // Realtime: reflect a driver accepting/completing a job instantly
+      // instead of waiting up to 20s for the next poll.
+      sb.channel('dispatches-dispatcher')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatches' }, () => {
+          loadActiveDispatches()
+          if (historyLoaded) loadHistory()
+        })
+        .subscribe()
     })
+
+    function switchTab(tab) {
+      document.getElementById('tabActive').classList.toggle('active', tab === 'active')
+      document.getElementById('tabHistory').classList.toggle('active', tab === 'history')
+      document.getElementById('activeList').style.display = tab === 'active' ? 'block' : 'none'
+      document.getElementById('historyList').style.display = tab === 'history' ? 'block' : 'none'
+      if (tab === 'history' && !historyLoaded) loadHistory()
+    }
+
+    async function loadHistory() {
+      const list = document.getElementById('historyList')
+      const { data } = await sb.from('dispatches')
+        .select('*')
+        .in('status', ['completed', 'cancelled'])
+        .order('created_at', { ascending: false })
+        .limit(25)
+
+      historyLoaded = true
+      if (!data || data.length === 0) {
+        list.innerHTML = '<div class="empty-state">No job history yet</div>'
+        return
+      }
+      list.innerHTML = data.map(d => {
+        const driver = driverMap[d.driver_id]
+        const unit = driver?.unit_number || '—'
+        const name = driver?.full_name || 'Unknown driver'
+        const timeStr = new Date(d.completed_at || d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        return `
+          <div class="dispatch-item">
+            <span class="dispatch-unit">U${escapeHtml(unit)}</span>
+            <div class="dispatch-info">
+              <div class="addr">${escapeHtml(d.site_address)}</div>
+              <div class="meta">${escapeHtml(name)} · ${timeStr}</div>
+            </div>
+            <span class="history-status ${d.status}">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span>
+          </div>
+        `
+      }).join('')
+    }
 
     async function loadDrivers() {
       const { data } = await sb.from('profiles').select('id, full_name, unit_number').eq('role', 'driver').order('unit_number')
@@ -305,14 +389,14 @@
       btn.disabled = true
       btn.textContent = 'Sending...'
 
-      const { error } = await sb.from('dispatches').insert({
+      const { data: inserted, error } = await sb.from('dispatches').insert({
         driver_id: driverId,
         site_address: address,
         lat: geocodedLat,
         lng: geocodedLng,
         notes: notes || null,
         created_by: currentUser.id
-      })
+      }).select().single()
 
       if (error) {
         alert('Error sending dispatch: ' + error.message)
@@ -320,6 +404,13 @@
         btn.textContent = 'Send Dispatch'
         return
       }
+
+      // Push the driver's phone in real time. Fire-and-forget: a missing/failed
+      // push (no token yet, APNs not configured yet, etc.) must never block the
+      // dispatch itself — the driver still sees it via the in-app realtime feed.
+      sb.functions.invoke('send-dispatch-push', {
+        body: { driver_id: driverId, dispatch_id: inserted.id, address }
+      }).catch(e => console.error('Push notify failed (non-fatal)', e))
 
       document.getElementById('successMsg').style.display = 'block'
       btn.textContent = '✓ Sent'
@@ -355,13 +446,18 @@
         const unit = driver?.unit_number || '—'
         const name = driver?.full_name || 'Unknown driver'
         const timeStr = new Date(d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        const accepted = !!d.accepted_at
+        const pill = accepted
+          ? '<span class="status-pill accepted">Accepted</span>'
+          : '<span class="status-pill pending">Pending</span>'
         return `
-          <div class="dispatch-item">
+          <div class="dispatch-item ${accepted ? 'accepted' : 'pending-accept'}">
             <span class="dispatch-unit">U${escapeHtml(unit)}</span>
             <div class="dispatch-info">
               <div class="addr">${escapeHtml(d.site_address)}</div>
               <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
             </div>
+            ${pill}
             <button class="btn-cancel" onclick="cancelDispatch('${escapeHtml(d.id)}')">Cancel</button>
           </div>
         `

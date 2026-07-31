@@ -122,6 +122,58 @@
       text-align: center;
       padding: 8px 0;
     }
+    .accept-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #f0fdf4;
+      color: #16a34a;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 4px 9px;
+      border-radius: 20px;
+      margin-bottom: 10px;
+    }
+    .card.dispatch-accepted { box-shadow: 0 0 0 2px #22c55e, 0 2px 10px rgba(0,0,0,0.06); }
+    .btn-accept {
+      width: 100%;
+      max-width: 400px;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+      background: #22c55e;
+      color: #ffffff;
+      margin-bottom: -8px;
+    }
+    .btn-accept:active { background: #16a34a; }
+
+    .history-toggle {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.4);
+      font-size: 12px;
+      text-decoration: underline;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .history-list { width: 100%; max-width: 400px; display: none; }
+    .history-list.open { display: block; }
+    .history-item {
+      background: rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.75);
+    }
+    .history-item .addr { font-weight: 700; color: #fff; margin-bottom: 2px; }
+    .history-item .meta { color: rgba(255,255,255,0.4); }
+    .history-item .status-cancelled { color: #f87171; }
 
     .btn-directions {
       width: 100%;
@@ -195,17 +247,20 @@
       <span id="infoLastSent">—</span>
     </div>
 
-    <div class="card">
+    <div class="card" id="dispatchCard">
       <div class="card-title">Current Dispatch</div>
       <div id="dispatchBody">
         <div class="dispatch-empty">No dispatch assigned</div>
       </div>
     </div>
 
+    <button class="btn-accept" id="acceptBtn" onclick="acceptDispatch()" style="display:none;">Accept Dispatch</button>
     <button class="btn-directions" id="directionsBtn" onclick="getDirections()" disabled>Get Directions</button>
     <button class="btn-complete" id="completeBtn" onclick="markComplete()" style="display:none;">Mark Job Complete</button>
 
     <button class="btn-track-toggle" id="trackToggle" onclick="toggleTracking()">Pause GPS tracking</button>
+    <button class="history-toggle" id="historyToggle" onclick="toggleHistory()">View recent jobs</button>
+    <div class="history-list" id="historyList"></div>
 
   </div>
 
@@ -215,7 +270,9 @@
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
     const BackgroundGeolocation = isNative ? window.Capacitor.Plugins.BackgroundGeolocation : null
+    const PushNotifications = isNative ? window.Capacitor.Plugins.PushNotifications : null
     let currentUser = null
+    let historyLoaded = false
     let tracking = false
     let watchId = null
     let bgWatcherId = null
@@ -236,7 +293,41 @@
       loadDispatch()
       setInterval(loadDispatch, 30000)
       startTracking()
+      registerPush()
+
+      // Realtime: reflect a new dispatch or a dispatcher-side change the moment
+      // it happens, instead of waiting up to 30s for the next poll.
+      sb.channel('dispatches-driver-' + currentUser.id)
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'dispatches',
+          filter: 'driver_id=eq.' + currentUser.id
+        }, () => loadDispatch())
+        .subscribe()
     })
+
+    async function registerPush() {
+      if (!isNative || !PushNotifications) return
+      try {
+        let perm = await PushNotifications.checkPermissions()
+        if (perm.receive !== 'granted') perm = await PushNotifications.requestPermissions()
+        if (perm.receive !== 'granted') return
+
+        PushNotifications.addListener('registration', async (token) => {
+          await sb.from('profiles').update({ push_token: token.value }).eq('id', currentUser.id)
+        })
+        PushNotifications.addListener('registrationError', (err) => {
+          console.error('Push registration error', err)
+        })
+        // Foreground delivery and a tap on the notification both just need the
+        // latest dispatch state on screen.
+        PushNotifications.addListener('pushNotificationReceived', () => loadDispatch())
+        PushNotifications.addListener('pushNotificationActionPerformed', () => loadDispatch())
+
+        await PushNotifications.register()
+      } catch (e) {
+        console.error('Could not set up push notifications', e)
+      }
+    }
 
     async function loadDispatch() {
       const { data } = await sb.from('dispatches')
@@ -248,23 +339,76 @@
         .maybeSingle()
 
       activeDispatch = data || null
+      const card = document.getElementById('dispatchCard')
       const body = document.getElementById('dispatchBody')
       const dirBtn = document.getElementById('directionsBtn')
       const completeBtn = document.getElementById('completeBtn')
+      const acceptBtn = document.getElementById('acceptBtn')
 
       if (!activeDispatch) {
+        card.classList.remove('dispatch-accepted')
         body.innerHTML = '<div class="dispatch-empty">No dispatch assigned</div>'
         dirBtn.disabled = true
         completeBtn.style.display = 'none'
+        acceptBtn.style.display = 'none'
         return
       }
 
+      const accepted = !!activeDispatch.accepted_at
+      card.classList.toggle('dispatch-accepted', accepted)
       body.innerHTML = `
+        ${accepted ? '<div class="accept-badge">✓ Accepted</div>' : ''}
         <div class="dispatch-address">${escapeHtml(activeDispatch.site_address)}</div>
         ${activeDispatch.notes ? `<div class="dispatch-notes">${escapeHtml(activeDispatch.notes)}</div>` : ''}
       `
       dirBtn.disabled = false
       completeBtn.style.display = 'block'
+      acceptBtn.style.display = accepted ? 'none' : 'block'
+    }
+
+    async function acceptDispatch() {
+      if (!activeDispatch) return
+      const btn = document.getElementById('acceptBtn')
+      btn.disabled = true
+      btn.textContent = 'Accepting...'
+      await sb.from('dispatches').update({ accepted_at: new Date().toISOString() }).eq('id', activeDispatch.id)
+      btn.disabled = false
+      btn.textContent = 'Accept Dispatch'
+      loadDispatch()
+    }
+
+    async function toggleHistory() {
+      const list = document.getElementById('historyList')
+      const open = list.classList.toggle('open')
+      document.getElementById('historyToggle').textContent = open ? 'Hide recent jobs' : 'View recent jobs'
+      if (open && !historyLoaded) await loadHistory()
+    }
+
+    async function loadHistory() {
+      const list = document.getElementById('historyList')
+      list.innerHTML = '<div class="history-item">Loading...</div>'
+      const { data } = await sb.from('dispatches')
+        .select('*')
+        .eq('driver_id', currentUser.id)
+        .in('status', ['completed', 'cancelled'])
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      historyLoaded = true
+      if (!data || data.length === 0) {
+        list.innerHTML = '<div class="history-item">No past jobs yet</div>'
+        return
+      }
+      list.innerHTML = data.map(d => {
+        const timeStr = new Date(d.completed_at || d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        const statusStr = d.status === 'cancelled' ? '<span class="status-cancelled">Cancelled</span>' : 'Completed'
+        return `
+          <div class="history-item">
+            <div class="addr">${escapeHtml(d.site_address)}</div>
+            <div class="meta">${statusStr} · ${timeStr}</div>
+          </div>
+        `
+      }).join('')
     }
 
     function getDirections() {
