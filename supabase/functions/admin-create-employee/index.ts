@@ -111,6 +111,10 @@ Deno.serve(async (req) => {
       typeof body.employment_type === 'string' && body.employment_type
         ? body.employment_type
         : 'staff'
+    // Role the caller wants for the new user: only 'driver' or 'admin' accepted;
+    // anything else falls back to 'driver'. Creating an admin is authorized here
+    // because the caller was already verified as an admin above (step 3).
+    const newRole = body.role === 'admin' ? 'admin' : 'driver'
 
     if (!email || !password || !full_name) {
       return json(
@@ -159,7 +163,32 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: error.message }, 400)
     }
 
-    return json({ ok: true, user_id: data.user.id }, 200)
+    // 6. If an admin was requested, promote the freshly-created row. The trigger
+    //    always inserts role='driver' (it never trusts signup metadata, which
+    //    blocks self-signup escalation), so admin promotion happens here, AFTER
+    //    the caller was verified as an admin. The service-role client has a null
+    //    auth.uid(), so the protect_profile_privileged_columns trigger does not
+    //    clamp it. We store 'dispatcher' — the backward-compatible privileged
+    //    value both the installed app and the new build recognise.
+    if (newRole === 'admin') {
+      const { error: promoteError } = await admin
+        .from('profiles')
+        .update({ role: 'dispatcher' })
+        .eq('id', data.user.id)
+      if (promoteError) {
+        return json(
+          {
+            ok: false,
+            error:
+              'Account created as a driver, but granting admin failed: ' +
+              promoteError.message,
+          },
+          500,
+        )
+      }
+    }
+
+    return json({ ok: true, user_id: data.user.id, role: newRole }, 200)
   } catch (e) {
     return json(
       { ok: false, error: e instanceof Error ? e.message : 'Unexpected error' },
