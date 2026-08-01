@@ -10,7 +10,8 @@ create table public.profiles (
   unit_number text,
   role text not null default 'driver' check (role in ('driver', 'dispatcher', 'admin')),
   employment_type text not null default 'staff' check (employment_type in ('staff', 'contractor')),
-  active boolean not null default true
+  active boolean not null default true,
+  push_token text                    -- APNs device token, written by the app after registration (0004)
 );
 
 -- 2. AUTO-CREATE PROFILE ON SIGNUP
@@ -96,10 +97,32 @@ create table public.dispatches (
   status text not null default 'active' check (status in ('active', 'completed', 'cancelled')),
   created_by uuid references auth.users not null,
   created_at timestamptz default now(),
-  completed_at timestamptz
+  completed_at timestamptz,
+  accepted_at timestamptz            -- set by the driver tapping Accept (0004)
 );
 
+-- Realtime: the driver and dispatcher UIs subscribe to postgres_changes on this
+-- table so accept/complete/cancel show up instantly instead of on the next poll.
+-- RLS still applies per subscriber. Guarded exactly as 0004 does — a bare ALTER
+-- PUBLICATION errors if the table is already a member, which would abort the
+-- rest of this script. (0004)
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'dispatches'
+  ) then
+    alter publication supabase_realtime add table public.dispatches;
+  end if;
+end $$;
+
 create index dispatches_driver_status_idx on public.dispatches (driver_id, status);
+-- driver_id LEADS the index above, so status-only predicates cannot use it.
+-- The dispatcher history/active lists and the live map all filter on status
+-- alone and sort by created_at. (0005)
+create index dispatches_status_created_idx on public.dispatches (status, created_at desc);
 
 -- 6. ROW LEVEL SECURITY
 alter table public.profiles enable row level security;
@@ -165,6 +188,14 @@ begin
     new.notes        := old.notes;
     new.created_by   := old.created_by;
     new.created_at   := old.created_at;
+
+    -- accepted_at: set once, at SERVER time. Not a blanket now() — that would
+    -- stamp an acceptance onto a job only ever marked complete. (0005)
+    if old.accepted_at is not null then
+      new.accepted_at := old.accepted_at;   -- immutable once set; cannot be cleared
+    elsif new.accepted_at is not null then
+      new.accepted_at := now();             -- first accept: ignore the device clock
+    end if;
   end if;
   return new;
 end;

@@ -170,6 +170,22 @@
     }
     .empty-state { color: #9aa0a6; font-size: 13px; text-align: center; padding: 8px 0; }
 
+    /* The dispatch itself always succeeds independently of the push, so a failed
+       phone alert is a warning, never an error — but it must be VISIBLE, or a
+       dead push pipeline looks exactly like a healthy one. */
+    .push-note {
+      display: none;
+      margin-top: 10px;
+      background: #fef9c3;
+      color: #854d0e;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .push-note.show { display: block; }
+
     .status-pill {
       font-size: 9.5px;
       font-weight: 800;
@@ -245,6 +261,7 @@
 
       <button class="btn-submit" id="submitBtn" onclick="submitDispatch()">Send Dispatch</button>
       <div class="success-msg" id="successMsg">✓ Dispatch sent</div>
+      <div class="push-note" id="pushNote"></div>
     </div>
 
     <div class="card">
@@ -267,6 +284,14 @@
     let geocodedLng = null
     let driverMap = {}
     let historyLoaded = false
+    let historyVisible = false
+    let dispatchChannel = null
+    // Monotonic guards: realtime, the 20s poll and post-action reloads can all be
+    // in flight at once, and a slow earlier response must not clobber a newer one.
+    let activeSeq = 0
+    let historySeq = 0
+    let pushSeq = 0
+    let activeRendered = false
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -275,36 +300,58 @@
       currentUser = session.user
       const { data: profile } = await sb.from('profiles').select('role').eq('id', session.user.id).single()
       if (profile?.role !== 'admin' && profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
-      loadDrivers()
+      // Await the roster first: loadActiveDispatches renders unit/name out of
+      // driverMap, so firing both together shows "Unknown driver" on first paint.
+      // Never let a slow or failed roster query gate the dispatch list, the poll
+      // or the realtime subscription — the list degrades to "Unknown driver",
+      // which is far better than showing nothing at all.
+      try { await loadDrivers() } catch (e) { console.error('Driver roster failed to load', e) }
       loadActiveDispatches()
       setInterval(loadActiveDispatches, 20000)
 
       // Realtime: reflect a driver accepting/completing a job instantly
       // instead of waiting up to 20s for the next poll.
-      sb.channel('dispatches-dispatcher')
+      dispatchChannel = sb.channel('dispatches-dispatcher')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatches' }, () => {
           loadActiveDispatches()
-          if (historyLoaded) loadHistory()
+          // Only refresh History while it is actually on screen. Otherwise a
+          // dispatcher who opened the tab once turns every fleet-wide event for
+          // the rest of the day into a hidden full-table query.
+          if (historyVisible) loadHistory()
+          else historyLoaded = false
         })
         .subscribe()
     })
 
+    window.addEventListener('pagehide', () => {
+      if (dispatchChannel) { sb.removeChannel(dispatchChannel); dispatchChannel = null }
+    })
+
     function switchTab(tab) {
+      historyVisible = tab === 'history'
       document.getElementById('tabActive').classList.toggle('active', tab === 'active')
       document.getElementById('tabHistory').classList.toggle('active', tab === 'history')
       document.getElementById('activeList').style.display = tab === 'active' ? 'block' : 'none'
-      document.getElementById('historyList').style.display = tab === 'history' ? 'block' : 'none'
-      if (tab === 'history' && !historyLoaded) loadHistory()
+      document.getElementById('historyList').style.display = historyVisible ? 'block' : 'none'
+      if (historyVisible && !historyLoaded) loadHistory()
     }
 
     async function loadHistory() {
+      const seq = ++historySeq
       const list = document.getElementById('historyList')
-      const { data } = await sb.from('dispatches')
+      const { data, error } = await sb.from('dispatches')
         .select('*')
         .in('status', ['completed', 'cancelled'])
         .order('created_at', { ascending: false })
         .limit(25)
 
+      if (seq !== historySeq) return
+      if (error) {
+        // Nothing polls History, so be honest about how to retry.
+        console.error('History load failed', error)
+        list.innerHTML = '<div class="empty-state">Could not load job history. Switch tabs to try again.</div>'
+        return
+      }
       historyLoaded = true
       if (!data || data.length === 0) {
         list.innerHTML = '<div class="empty-state">No job history yet</div>'
@@ -322,7 +369,7 @@
               <div class="addr">${escapeHtml(d.site_address)}</div>
               <div class="meta">${escapeHtml(name)} · ${timeStr}</div>
             </div>
-            <span class="history-status ${d.status}">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span>
+            <span class="history-status ${escapeHtml(d.status)}">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span>
           </div>
         `
       }).join('')
@@ -405,12 +452,44 @@
         return
       }
 
-      // Push the driver's phone in real time. Fire-and-forget: a missing/failed
-      // push (no token yet, APNs not configured yet, etc.) must never block the
-      // dispatch itself — the driver still sees it via the in-app realtime feed.
+      // Push the driver's phone. Still non-blocking — the dispatch has already
+      // been saved and the driver sees it via realtime regardless — but the
+      // RESULT is now surfaced. invoke() resolves rather than rejects on
+      // failure, and the function reports delivery in the body, so without this
+      // a completely dead push pipeline looks identical to a healthy one.
+      // Note: address is no longer sent; the function reads site_address from
+      // the dispatch row so the alert can never disagree with the record.
+      const pushNote = document.getElementById('pushNote')
+      pushNote.classList.remove('show')
+      // Guard: two dispatches sent in quick succession can resolve out of order,
+      // and a stale result must not post a warning against the newer send.
+      const mySend = ++pushSeq
       sb.functions.invoke('send-dispatch-push', {
-        body: { driver_id: driverId, dispatch_id: inserted.id, address }
-      }).catch(e => console.error('Push notify failed (non-fatal)', e))
+        body: { driver_id: driverId, dispatch_id: inserted.id }
+      }).then(async ({ data: res, error: fnErr }) => {
+        if (mySend !== pushSeq) return
+        if (fnErr || !res || res.sent !== true) {
+          let reason = (res && (res.reason || res.error)) || (fnErr && fnErr.message) || 'unknown error'
+          // supabase-js wraps any non-2xx as FunctionsHttpError and hides the
+          // body, so fnErr.message is the useless "Edge Function returned a
+          // non-2xx status code". The real reason is in the response body.
+          if (fnErr && fnErr.context && typeof fnErr.context.json === 'function') {
+            try {
+              const b = await fnErr.context.json()
+              if (b && (b.error || b.reason)) reason = b.error || b.reason
+            } catch (_) { /* body not JSON — keep the fallback */ }
+          }
+          if (mySend !== pushSeq) return
+          console.error('Push not delivered:', reason)
+          pushNote.textContent = '⚠ Dispatch saved, but the phone alert was not delivered (' + reason + '). The driver will still see it in the app.'
+          pushNote.classList.add('show')
+        }
+      }).catch(e => {
+        if (mySend !== pushSeq) return
+        console.error('Push notify failed', e)
+        pushNote.textContent = '⚠ Dispatch saved, but the phone alert could not be sent. The driver will still see it in the app.'
+        pushNote.classList.add('show')
+      })
 
       document.getElementById('successMsg').style.display = 'block'
       btn.textContent = '✓ Sent'
@@ -430,12 +509,24 @@
     }
 
     async function loadActiveDispatches() {
-      const { data } = await sb.from('dispatches')
+      const seq = ++activeSeq
+      const { data, error } = await sb.from('dispatches')
         .select('*')
         .eq('status', 'active')
         .order('created_at', { ascending: false })
 
+      // A newer load already rendered — discard this stale response.
+      if (seq !== activeSeq) return
+
       const list = document.getElementById('activeList')
+      if (error) {
+        // Keep the last good list on screen rather than blanking the board on a
+        // blip; the 20s poll retries. Only show the message if we never rendered.
+        console.error('Active dispatches refresh failed', error)
+        if (!activeRendered) list.innerHTML = '<div class="empty-state">Could not load active dispatches. Retrying every 20s.</div>'
+        return
+      }
+      activeRendered = true
       if (!data || data.length === 0) {
         list.innerHTML = '<div class="empty-state">No active dispatches</div>'
         return
@@ -458,15 +549,27 @@
               <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
             </div>
             ${pill}
-            <button class="btn-cancel" onclick="cancelDispatch('${escapeHtml(d.id)}')">Cancel</button>
+            <button class="btn-cancel" data-action="cancel" data-id="${escapeHtml(d.id)}">Cancel</button>
           </div>
         `
       }).join('')
     }
 
+    // Delegated: the id travels in a data-* attribute rather than being
+    // interpolated into an inline onclick. HTML-escaping does NOT make a value
+    // safe inside a JS string literal — the parser decodes entities before the
+    // handler is compiled, so an escaped quote still breaks out. Safe here only
+    // because d.id is a uuid column; this removes the dependency on that.
+    document.getElementById('activeList').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action="cancel"]')
+      if (btn) cancelDispatch(btn.dataset.id)
+    })
+
     async function cancelDispatch(id) {
       if (!confirm('Cancel this dispatch?')) return
-      await sb.from('dispatches').update({ status: 'cancelled' }).eq('id', id)
+      const { error } = await sb.from('dispatches').update({ status: 'cancelled' }).eq('id', id)
+      if (error) { alert('Could not cancel: ' + error.message); return }
+      historyLoaded = false
       loadActiveDispatches()
     }
 
