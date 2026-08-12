@@ -6,6 +6,7 @@
   <title>Cooney's Trucking — Dispatch</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#15161a">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -200,6 +201,91 @@
     .history-status { font-size: 10.5px; font-weight: 700; text-transform: uppercase; }
     .history-status.completed { color: #16a34a; }
     .history-status.cancelled { color: #ef4444; }
+
+    .driver-filter-row {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 10px;
+      margin-bottom: 4px;
+    }
+    .driver-chip {
+      flex-shrink: 0;
+      background: #f4f5f7;
+      border: 1.5px solid transparent;
+      border-radius: 20px;
+      padding: 6px 12px;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #6c757d;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .driver-chip.active { background: #eaf1ff; border-color: var(--brand-blue); color: var(--brand-blue); }
+
+    .dispatch-item.clickable { cursor: pointer; }
+    .dispatch-item.clickable:active { background: #f9fafb; }
+    .dispatch-chevron { color: #c3c8ce; font-size: 13px; flex-shrink: 0; }
+
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15,16,20,0.55);
+      z-index: 2000;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-card {
+      background: #fff;
+      border-radius: 18px 18px 0 0;
+      padding: 22px 20px 28px;
+      width: 100%;
+      max-width: 460px;
+      max-height: 85vh;
+      overflow-y: auto;
+      position: relative;
+    }
+    @media (min-width: 480px) {
+      .modal-overlay { align-items: center; }
+      .modal-card { border-radius: 16px; }
+    }
+    .modal-close {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      background: #f4f5f7;
+      border: none;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      font-size: 14px;
+      color: #6c757d;
+      cursor: pointer;
+    }
+    .modal-title { font-size: 17px; font-weight: 800; color: #15161a; padding-right: 36px; overflow-wrap: anywhere; }
+    .modal-driver { font-size: 12.5px; color: #6c757d; font-weight: 600; margin-top: 3px; }
+    .modal-notes {
+      font-size: 13px;
+      color: #15161a;
+      background: #f4f5f7;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-top: 12px;
+    }
+    .modal-timeline { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .modal-timeline-row { display: flex; justify-content: space-between; font-size: 12.5px; }
+    .modal-timeline-row .label { color: #9aa0a6; font-weight: 600; }
+    .modal-timeline-row .value { color: #15161a; font-weight: 700; }
+    .modal-route-map { height: 220px; border-radius: 12px; margin-top: 16px; display: none; }
+    .modal-empty-route {
+      display: none;
+      font-size: 12.5px;
+      color: #9aa0a6;
+      text-align: center;
+      padding: 14px 0 2px;
+    }
   </style>
 </head>
 <body>
@@ -253,13 +339,29 @@
         <button class="tab-btn" id="tabHistory" onclick="switchTab('history')">History</button>
       </div>
       <div id="activeList"><div class="empty-state">Loading...</div></div>
-      <div id="historyList" style="display:none;"><div class="empty-state">Loading...</div></div>
+      <div id="historyList" style="display:none;">
+        <div class="driver-filter-row" id="driverFilterRow"></div>
+        <div id="historyItems"><div class="empty-state">Loading...</div></div>
+      </div>
     </div>
 
   </div>
 
+  <div class="modal-overlay" id="historyModalOverlay" onclick="if(event.target===this) closeHistoryModal()">
+    <div class="modal-card">
+      <button class="modal-close" onclick="closeHistoryModal()">✕</button>
+      <div class="modal-title" id="modalTitle"></div>
+      <div class="modal-driver" id="modalDriver"></div>
+      <div class="modal-notes" id="modalNotes" style="display:none;"></div>
+      <div class="modal-timeline" id="modalTimeline"></div>
+      <div class="modal-route-map" id="modalRouteMap"></div>
+      <div class="modal-empty-route" id="modalEmptyRoute">No GPS data recorded for this job.</div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     let currentUser = null
@@ -267,6 +369,10 @@
     let geocodedLng = null
     let driverMap = {}
     let historyLoaded = false
+    let historyDriverFilter = null
+    let historyById = {}
+    let detailMap = null
+    let detailMapLine = null
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -297,35 +403,137 @@
       if (tab === 'history' && !historyLoaded) loadHistory()
     }
 
+    function renderDriverChips() {
+      const row = document.getElementById('driverFilterRow')
+      const drivers = Object.values(driverMap).sort((a, b) => (a.unit_number || '').localeCompare(b.unit_number || '', undefined, { numeric: true }))
+      const chips = [{ id: null, label: 'All Drivers' }, ...drivers.map(d => ({ id: d.id, label: 'Unit ' + (d.unit_number || '—') }))]
+      row.innerHTML = chips.map(c => `
+        <button class="driver-chip${historyDriverFilter === c.id ? ' active' : ''}" onclick="filterHistoryByDriver(${c.id ? `'${escapeHtml(c.id)}'` : 'null'})">${escapeHtml(c.label)}</button>
+      `).join('')
+    }
+
+    function filterHistoryByDriver(driverId) {
+      historyDriverFilter = driverId
+      loadHistory()
+    }
+
     async function loadHistory() {
-      const list = document.getElementById('historyList')
-      const { data } = await sb.from('dispatches')
+      const itemsEl = document.getElementById('historyItems')
+      renderDriverChips()
+
+      let query = sb.from('dispatches')
         .select('*')
         .in('status', ['completed', 'cancelled'])
         .order('created_at', { ascending: false })
-        .limit(25)
+        .limit(historyDriverFilter ? 50 : 25)
+      if (historyDriverFilter) query = query.eq('driver_id', historyDriverFilter)
+      const { data } = await query
 
       historyLoaded = true
+      historyById = {}
       if (!data || data.length === 0) {
-        list.innerHTML = '<div class="empty-state">No job history yet</div>'
+        itemsEl.innerHTML = '<div class="empty-state">No job history yet</div>'
         return
       }
-      list.innerHTML = data.map(d => {
+      data.forEach(d => { historyById[d.id] = d })
+      itemsEl.innerHTML = data.map(d => {
         const driver = driverMap[d.driver_id]
         const unit = driver?.unit_number || '—'
         const name = driver?.full_name || 'Unknown driver'
         const timeStr = new Date(d.completed_at || d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         return `
-          <div class="dispatch-item">
+          <div class="dispatch-item clickable" onclick="openHistoryDetail('${escapeHtml(d.id)}')">
             <span class="dispatch-unit">U${escapeHtml(unit)}</span>
             <div class="dispatch-info">
               <div class="addr">${escapeHtml(d.site_address)}</div>
               <div class="meta">${escapeHtml(name)} · ${timeStr}</div>
             </div>
             <span class="history-status ${d.status}">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span>
+            <span class="dispatch-chevron">›</span>
           </div>
         `
       }).join('')
+    }
+
+    function fmtTime(iso) {
+      return iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
+    }
+
+    function fmtDuration(startIso, endIso) {
+      if (!startIso || !endIso) return null
+      const mins = Math.round((new Date(endIso) - new Date(startIso)) / 60000)
+      if (mins < 60) return mins + ' min'
+      return Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm'
+    }
+
+    async function openHistoryDetail(id) {
+      const d = historyById[id]
+      if (!d) return
+      const driver = driverMap[d.driver_id]
+      const unit = driver?.unit_number || '—'
+      const name = driver?.full_name || 'Unknown driver'
+
+      document.getElementById('modalTitle').textContent = d.site_address
+      document.getElementById('modalDriver').textContent = `Unit ${unit} — ${name}`
+
+      const notesEl = document.getElementById('modalNotes')
+      if (d.notes) { notesEl.textContent = d.notes; notesEl.style.display = 'block' }
+      else { notesEl.style.display = 'none' }
+
+      const duration = fmtDuration(d.accepted_at, d.completed_at)
+      document.getElementById('modalTimeline').innerHTML = `
+        <div class="modal-timeline-row"><span class="label">Sent</span><span class="value">${fmtTime(d.created_at)}</span></div>
+        <div class="modal-timeline-row"><span class="label">Accepted</span><span class="value">${fmtTime(d.accepted_at)}</span></div>
+        <div class="modal-timeline-row"><span class="label">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span><span class="value">${fmtTime(d.completed_at)}</span></div>
+        ${duration ? `<div class="modal-timeline-row"><span class="label">On job</span><span class="value">${duration}</span></div>` : ''}
+      `
+
+      document.getElementById('historyModalOverlay').classList.add('open')
+
+      // Route breadcrumb: actual GPS pings for this driver across the job window.
+      const routeStart = d.accepted_at || d.created_at
+      const routeEnd = d.completed_at || new Date().toISOString()
+      const mapEl = document.getElementById('modalRouteMap')
+      const emptyEl = document.getElementById('modalEmptyRoute')
+      mapEl.style.display = 'none'
+      emptyEl.style.display = 'none'
+
+      const { data: pings } = await sb.from('location_updates')
+        .select('lat, lng, created_at')
+        .eq('user_id', d.driver_id)
+        .gte('created_at', routeStart)
+        .lte('created_at', routeEnd)
+        .order('created_at', { ascending: true })
+
+      if (!pings || pings.length === 0) {
+        emptyEl.style.display = 'block'
+        return
+      }
+
+      mapEl.style.display = 'block'
+      const points = pings.map(p => [parseFloat(p.lat), parseFloat(p.lng)])
+
+      if (!detailMap) {
+        detailMap = L.map('modalRouteMap')
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors',
+          maxZoom: 19
+        }).addTo(detailMap)
+      }
+      detailMap.invalidateSize()
+      if (detailMapLine) { detailMap.removeLayer(detailMapLine) }
+
+      if (points.length === 1) {
+        detailMapLine = L.circleMarker(points[0], { radius: 6, color: 'var(--brand-blue)' }).addTo(detailMap)
+        detailMap.setView(points[0], 15)
+      } else {
+        detailMapLine = L.polyline(points, { color: 'var(--brand-blue)', weight: 4, opacity: 0.8 }).addTo(detailMap)
+        detailMap.fitBounds(detailMapLine.getBounds(), { padding: [20, 20] })
+      }
+    }
+
+    function closeHistoryModal() {
+      document.getElementById('historyModalOverlay').classList.remove('open')
     }
 
     async function loadDrivers() {
