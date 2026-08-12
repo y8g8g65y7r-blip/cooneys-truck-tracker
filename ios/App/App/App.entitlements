@@ -4,5 +4,18 @@
 <dict>
 	<key>aps-environment</key>
 	<string>production</string>
+	<!-- DELIBERATELY NOT ADDED YET:
+	       com.apple.developer.usernotifications.time-sensitive
+	     Dispatch alerts should pierce Driving Focus, but that entitlement is
+	     provisioning-backed: Codemagic signs with
+	     `app-store-connect fetch-signing-files --create`, which builds a profile
+	     from the App ID's CURRENTLY ENABLED capabilities and never enables a new
+	     one. Adding the key before "Time Sensitive Notifications" is enabled on
+	     the App ID would fail build-ipa with "profile doesn't include the
+	     entitlement" — on a workflow that is already failing at exit 65. That
+	     would block the AppDelegate push fix, which is the whole point.
+	     Ship as one atomic follow-up: enable the capability in the Developer
+	     Portal, add this key, add 'interruption-level': 'time-sensitive' to the
+	     APNs payload, confirm one green ad-hoc build. -->
 </dict>
 </plist>

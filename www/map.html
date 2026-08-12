@@ -112,6 +112,23 @@
     let trailLines = {}
     let dispatchMarkers = {}
     let routeLines = {}
+    // fitBounds must not fight an operator who has panned or zoomed. Auto-fit
+    // only on the first render and whenever the set of things on the map changes.
+    let lastBoundsKey = ''
+    let hasFitOnce = false
+    // Auto-follow until the operator takes control. dragstart is user-initiated
+    // only (programmatic setView/fitBounds do not fire it), so this cleanly
+    // distinguishes "operator is inspecting something" from "map moved itself".
+    let userMoved = false
+
+    // Leaflet applies polyline `color` via setAttribute('stroke', ...), i.e. an
+    // SVG PRESENTATION ATTRIBUTE. var() there is unspecified — SVG2 as written
+    // forbids it and the SVG WG only resolved to allow it in Nov 2025, with no
+    // test coverage yet. Chromium and current WebKit happen to support it for
+    // paint, but the iOS 14 floor is unverified and an unresolved var computes to
+    // stroke:none, i.e. an INVISIBLE trail. Use the literal; keep theme.css as
+    // the source of truth for every context where var() is actually specified.
+    const BRAND_BLUE = '#004AAD'
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -130,6 +147,7 @@
         attribution: '© OpenStreetMap contributors',
         maxZoom: 19
       }).addTo(map)
+      map.on('dragstart', () => { userMoved = true })
     }
 
     const LIVE_MS = 5 * 60 * 1000 // pinged within 5 min = "Live"
@@ -151,14 +169,28 @@
       // shown by colour: live = brand blue, stale = grey.
       const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-      const [{ data: locData }, { data: profileData }, { data: dispatchData }] = await Promise.all([
+      const [locRes, profRes, dispRes] = await Promise.all([
         sb.from('location_updates')
           .select('*')
           .gte('created_at', dayAgo)
           .order('created_at', { ascending: false }),
         sb.from('profiles').select('id, full_name, unit_number').eq('role', 'driver'),
+        // NOT time-bounded: dispatcher.html lists every active job regardless of
+        // age, and a map that silently omits one the board still shows is worse
+        // than a stale pin. Ageing stale jobs out belongs in a server-side sweep.
         sb.from('dispatches').select('*').eq('status', 'active')
       ])
+
+      // supabase-js RESOLVES with {data:null, error} on failure. Rendering that
+      // would clear every truck, trail and pin off the board on a single blip,
+      // so keep whatever is already drawn and wait for the next 15s refresh.
+      if (locRes.error || profRes.error || dispRes.error) {
+        console.error('Map refresh failed', locRes.error || profRes.error || dispRes.error)
+        return
+      }
+      const locData = locRes.data
+      const profileData = profRes.data
+      const dispatchData = dispRes.data
 
       const profileMap = {}
       profileData?.forEach(p => { profileMap[p.id] = p })
@@ -186,12 +218,16 @@
         if (!shownIds.has(uid)) { map.removeLayer(trailLines[uid]); delete trailLines[uid] }
       })
 
-      // Breadcrumb trails — faint brand-blue line through each driver's recent pings.
+      // Breadcrumb trails — faint brand-blue line through each driver's recent
+      // pings. Update coordinates in place rather than destroying and rebuilding
+      // every polyline each cycle; trails can run to hundreds of points.
       shownIds.forEach(uid => {
         const pts = (trailByUser[uid] || []).map(p => [parseFloat(p.lat), parseFloat(p.lng)])
-        if (trailLines[uid]) { map.removeLayer(trailLines[uid]); delete trailLines[uid] }
         if (pts.length > 1) {
-          trailLines[uid] = L.polyline(pts, { color: 'var(--brand-blue)', weight: 3, opacity: 0.35 }).addTo(map)
+          if (trailLines[uid]) trailLines[uid].setLatLngs(pts)
+          else trailLines[uid] = L.polyline(pts, { color: BRAND_BLUE, weight: 3, opacity: 0.35 }).addTo(map)
+        } else if (trailLines[uid]) {
+          map.removeLayer(trailLines[uid]); delete trailLines[uid]
         }
       })
 
@@ -262,12 +298,16 @@
         bounds.push([lat, lng])
 
         const truckLoc = latestByUser[d.driver_id]
-        if (routeLines[d.id]) { map.removeLayer(routeLines[d.id]); delete routeLines[d.id] }
         if (truckLoc) {
-          routeLines[d.id] = L.polyline(
-            [[parseFloat(truckLoc.lat), parseFloat(truckLoc.lng)], [lat, lng]],
-            { color, weight: 2, opacity: 0.6, dashArray: '6,8' }
-          ).addTo(map)
+          const pts = [[parseFloat(truckLoc.lat), parseFloat(truckLoc.lng)], [lat, lng]]
+          if (routeLines[d.id]) {
+            routeLines[d.id].setLatLngs(pts)
+            routeLines[d.id].setStyle({ color })
+          } else {
+            routeLines[d.id] = L.polyline(pts, { color, weight: 2, opacity: 0.6, dashArray: '6,8' }).addTo(map)
+          }
+        } else if (routeLines[d.id]) {
+          map.removeLayer(routeLines[d.id]); delete routeLines[d.id]
         }
       })
       Object.keys(dispatchMarkers).forEach(id => {
@@ -277,8 +317,19 @@
         if (!activeDispatchIds.has(id)) { map.removeLayer(routeLines[id]); delete routeLines[id] }
       })
 
-      if (bounds.length === 1) map.setView(bounds[0], 14)
-      else if (bounds.length > 1) map.fitBounds(bounds, { padding: [40, 40] })
+      // Auto-fit on the first render, when the SET of trucks/jobs changes, and —
+      // only while the operator has not panned — when something has driven out of
+      // view. Re-fitting unconditionally every 15s snapped the view back and made
+      // close-up monitoring impossible.
+      const boundsKey = Array.from(shownIds).sort().join(',') + '|' + Array.from(activeDispatchIds).sort().join(',')
+      const drovenOutOfView = !userMoved && bounds.length > 0 &&
+        !bounds.every(p => map.getBounds().contains(p))
+      if (bounds.length && (!hasFitOnce || boundsKey !== lastBoundsKey || drovenOutOfView)) {
+        if (bounds.length === 1) map.setView(bounds[0], 14)
+        else map.fitBounds(bounds, { padding: [40, 40] })
+        hasFitOnce = true
+      }
+      lastBoundsKey = boundsKey
 
       // Roster strip — same set; Live if pinged within 5 min, else last-seen time.
       const roster = document.getElementById('roster')
