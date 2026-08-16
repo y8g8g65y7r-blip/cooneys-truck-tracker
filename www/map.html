@@ -59,6 +59,18 @@
       display: inline-block;
     }
     .refresh-info { font-size: 11px; color: rgba(255,255,255,0.4); }
+    /* Routing degrading back to straight lines must be VISIBLE. A map that
+       quietly stopped following roads looks identical to one that never did. */
+    .route-notice {
+      display: none;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fbbf24;
+      background: rgba(245,158,11,0.15);
+      border-radius: 5px;
+      padding: 3px 8px;
+    }
+    .route-notice.show { display: inline-block; }
     #map { flex: 1; min-height: calc(100vh - 120px); z-index: 1; }
     .roster {
       background: #15161a;
@@ -108,6 +120,7 @@
       <span class="live-badge">Live</span>
     </div>
     <div class="header-right">
+      <span class="route-notice" id="routeNotice"></span>
       <span class="refresh-info" id="refreshInfo">—</span>
       <a href="employees.html" class="btn-back">Employees</a>
       <a href="dispatcher.html" class="btn-back">← Dispatch</a>
@@ -121,6 +134,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="legs.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -153,6 +167,160 @@
     const IDLE_FRESH_MS = 12 * 60 * 1000
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    // --- Road routing (OSRM) -------------------------------------------------
+    // The dashed line to a dispatch used to be a straight geometric line, which
+    // in Calgary is routinely wrong by kilometres — it cuts across the Bow, the
+    // rail yards and Deerfoot. This traces the actual driving route instead,
+    // and gives dispatch a real road distance and drive time in the pin popup.
+    //
+    // router.project-osrm.org is the public demo server: free, no key, same
+    // OpenStreetMap family as the Nominatim geocoding dispatcher.html already
+    // uses. It is explicitly NOT built for production traffic, so everything
+    // below exists to keep this fleet's load negligible and to degrade to the
+    // old straight line the moment it stops answering.
+    const OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving/'
+    const ROUTE_TIMEOUT_MS = 6000
+    // A truck that has not moved 500m does not need a new route, and no job is
+    // re-routed more than once a minute however fast it is moving. A parked
+    // truck therefore costs zero requests, and a full fleet of 5 moving trucks
+    // costs at most 5 requests/minute.
+    const ROUTE_MIN_REFRESH_MS = 60 * 1000
+    const ROUTE_MOVE_THRESHOLD_M = 500
+    // Throttled or down: stop asking for a while rather than hammering it, and
+    // SAY SO in the header — a silently degraded map that quietly went back to
+    // straight lines would be worse than no feature at all.
+    const ROUTE_FAIL_LIMIT = 3
+    const ROUTE_BACKOFF_MS = 5 * 60 * 1000
+
+    const routeCache = {}   // dispatch id -> { latlngs, from, to, at, distanceM, durationS }
+    const truckPos = {}     // dispatch id -> the truck's latest [lat, lng]
+    let routeQueue = []
+    let routePumping = false
+    let routeFailures = 0
+    let routeBlockedUntil = 0
+
+    function metres(aLat, aLng, bLat, bLng) {
+      return (window.TruckLegs && TruckLegs.haversine)
+        ? TruckLegs.haversine(aLat, aLng, bLat, bLng)
+        : Number.POSITIVE_INFINITY
+    }
+
+    function setRouteNotice() {
+      const el = document.getElementById('routeNotice')
+      const blocked = Date.now() < routeBlockedUntil
+      el.textContent = blocked ? 'Road routing unavailable — showing direct lines' : ''
+      el.classList.toggle('show', blocked)
+    }
+
+    function noteRouteFailure(reason) {
+      routeFailures++
+      if (routeFailures >= ROUTE_FAIL_LIMIT) {
+        routeBlockedUntil = Date.now() + ROUTE_BACKOFF_MS
+        routeQueue = []
+        console.warn(`Road routing disabled for 5 min after ${routeFailures} failures (${reason}). Falling back to direct lines.`)
+        setRouteNotice()
+      }
+    }
+
+    function queueRoute(id, from, to) {
+      if (Date.now() < routeBlockedUntil) return
+      const c = routeCache[id]
+      if (c) {
+        // A pin dropped somewhere unroutable is not a server problem — never
+        // ask again for that job.
+        if (c.unroutable && metres(c.to.lat, c.to.lng, to.lat, to.lng) < 1) return
+        if (Date.now() - c.at < ROUTE_MIN_REFRESH_MS) return
+        const destMoved = metres(c.to.lat, c.to.lng, to.lat, to.lng) >= 1
+        const truckMoved = metres(c.from.lat, c.from.lng, from.lat, from.lng) >= ROUTE_MOVE_THRESHOLD_M
+        if (!destMoved && !truckMoved) return
+      }
+      if (routeQueue.some(q => q.id === id)) return
+      routeQueue.push({ id: id, from: from, to: to })
+      pumpRouteQueue()
+    }
+
+    // One request at a time with a gap between them. Five parallel requests on
+    // every 15s refresh is exactly the burst pattern the demo server rate-limits.
+    async function pumpRouteQueue() {
+      if (routePumping) return
+      routePumping = true
+      try {
+        while (routeQueue.length) {
+          if (Date.now() < routeBlockedUntil) { routeQueue = []; break }
+          const job = routeQueue.shift()
+          const ok = await fetchRoute(job)
+          await new Promise(r => setTimeout(r, ok ? 350 : 1200))
+        }
+      } finally {
+        routePumping = false
+      }
+    }
+
+    async function fetchRoute(job) {
+      // OSRM takes lon,lat — the opposite order to Leaflet. Getting this
+      // backwards silently returns a route somewhere off the coast of Africa.
+      const coords = `${job.from.lng},${job.from.lat};${job.to.lng},${job.to.lat}`
+      const url = `${OSRM_BASE}${coords}?overview=full&geometries=geojson&alternatives=false&steps=false`
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), ROUTE_TIMEOUT_MS)
+      try {
+        const res = await fetch(url, { signal: ctrl.signal })
+        if (res.status === 429 || res.status === 503) { noteRouteFailure('rate limited'); return false }
+        if (!res.ok) { noteRouteFailure('HTTP ' + res.status); return false }
+        const j = await res.json()
+        if (j.code !== 'Ok' || !j.routes || !j.routes.length || !j.routes[0].geometry) {
+          // Genuinely no road route (a pin in the middle of a field). Remember
+          // that so the straight line stands and we stop asking.
+          routeCache[job.id] = { latlngs: null, unroutable: true, from: job.from, to: job.to, at: Date.now() }
+          routeFailures = 0
+          return true
+        }
+        const r = j.routes[0]
+        routeCache[job.id] = {
+          latlngs: r.geometry.coordinates.map(c => [c[1], c[0]]),
+          from: job.from, to: job.to, at: Date.now(),
+          distanceM: r.distance, durationS: r.duration
+        }
+        routeFailures = 0
+        applyRoute(job.id)
+        return true
+      } catch (e) {
+        noteRouteFailure(e && e.name === 'AbortError' ? 'timeout' : (e && e.message) || 'network')
+        return false
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+
+    // The cached route starts wherever the truck was when it was fetched. Snap
+    // to the nearest point on it and draw from the truck's CURRENT position, so
+    // the line stays attached to the marker instead of trailing a stub behind.
+    function routeFrom(latlngs, lat, lng) {
+      let best = 0, bestD = Infinity
+      for (let i = 0; i < latlngs.length; i++) {
+        const d = metres(lat, lng, latlngs[i][0], latlngs[i][1])
+        if (d < bestD) { bestD = d; best = i }
+      }
+      return [[lat, lng]].concat(latlngs.slice(best))
+    }
+
+    function applyRoute(id) {
+      const c = routeCache[id]
+      const t = truckPos[id]
+      if (!c || !c.latlngs || !routeLines[id] || !t) return
+      // Only the line is redrawn here. The popup is rebuilt wholesale on the
+      // next 15s refresh, which picks the distance/ETA up from the cache —
+      // string-surgery on live popup HTML to save 15 seconds is not worth the
+      // fragility.
+      routeLines[id].setLatLngs(routeFrom(c.latlngs, t[0], t[1]))
+    }
+
+    function fmtEta(seconds) {
+      const m = Math.round(seconds / 60)
+      if (m < 60) return m + ' min'
+      return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'
+    }
 
     sb.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { window.location.href = 'index.html'; return }
@@ -329,7 +497,14 @@
           iconSize: [32, 32],
           iconAnchor: [16, 32]
         })
-        const popup = `<b>${accepted ? '✓ Accepted' : 'Pending'}</b> — Unit ${escapeHtml(unit)} (${escapeHtml(name)})<br>${escapeHtml(d.site_address)}${d.notes ? '<br>' + escapeHtml(d.notes) : ''}`
+        const cached = routeCache[d.id]
+        // Road distance and drive time, straight off the route we already
+        // fetched — the single most useful thing on this popup for a
+        // dispatcher deciding who to send next.
+        const etaStr = (cached && cached.latlngs && cached.distanceM != null)
+          ? `<br><b>${(cached.distanceM / 1000).toFixed(1)} km · ${fmtEta(cached.durationS)}</b> by road`
+          : ''
+        const popup = `<b>${accepted ? '✓ Accepted' : 'Pending'}</b> — Unit ${escapeHtml(unit)} (${escapeHtml(name)})<br>${escapeHtml(d.site_address)}${d.notes ? '<br>' + escapeHtml(d.notes) : ''}${etaStr}`
 
         if (dispatchMarkers[d.id]) {
           dispatchMarkers[d.id].setIcon(icon)
@@ -341,13 +516,25 @@
 
         const truckLoc = latestByUser[d.driver_id]
         if (truckLoc) {
-          const pts = [[parseFloat(truckLoc.lat), parseFloat(truckLoc.lng)], [lat, lng]]
+          const tLat = parseFloat(truckLoc.lat)
+          const tLng = parseFloat(truckLoc.lng)
+          // Draw immediately from whatever we have — the road route if it is
+          // already cached, otherwise the straight line. The routing call never
+          // gates the map: it upgrades the line in place when it lands, and if
+          // it never lands the straight line is simply what stays on screen.
+          const pts = (cached && cached.latlngs)
+            ? routeFrom(cached.latlngs, tLat, tLng)
+            : [[tLat, tLng], [lat, lng]]
           if (routeLines[d.id]) {
             routeLines[d.id].setLatLngs(pts)
             routeLines[d.id].setStyle({ color })
           } else {
-            routeLines[d.id] = L.polyline(pts, { color, weight: 2, opacity: 0.6, dashArray: '6,8' }).addTo(map)
+            routeLines[d.id] = L.polyline(pts, { color, weight: 3, opacity: 0.65, dashArray: '8,7' }).addTo(map)
           }
+          // Remember where the truck is now so a route arriving asynchronously
+          // snaps to the current position rather than a stale one.
+          truckPos[d.id] = [tLat, tLng]
+          queueRoute(d.id, { lat: tLat, lng: tLng }, { lat: lat, lng: lng })
         } else if (routeLines[d.id]) {
           map.removeLayer(routeLines[d.id]); delete routeLines[d.id]
         }
@@ -358,6 +545,11 @@
       Object.keys(routeLines).forEach(id => {
         if (!activeDispatchIds.has(id)) { map.removeLayer(routeLines[id]); delete routeLines[id] }
       })
+      // Drop cached routes for finished jobs so this cannot grow all day.
+      Object.keys(routeCache).forEach(id => {
+        if (!activeDispatchIds.has(id)) { delete routeCache[id]; delete truckPos[id] }
+      })
+      setRouteNotice()
 
       // Auto-fit on the first render, when the SET of trucks/jobs changes, and —
       // only while the operator has not panned — when something has driven out of
