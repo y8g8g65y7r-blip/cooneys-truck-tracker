@@ -308,6 +308,144 @@
       margin-top: 4px;
     }
 
+    /* --- Complete-job sheet -------------------------------------------------
+       Replaces a bare confirm(). Completion is irreversible from the driver
+       UI and now also carries an OPTIONAL photo, which a system dialog cannot
+       express. Optional is the whole point: whether a photo is wanted depends
+       on the job, and forcing one just teaches drivers to shoot the cab floor
+       to get past the step. */
+    .sheet-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(10,11,14,0.66);
+      z-index: 3000;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .sheet-overlay.open { display: flex; }
+    .sheet-card {
+      background: #fff;
+      border-radius: 18px 18px 0 0;
+      padding: 22px 20px calc(24px + env(safe-area-inset-bottom));
+      width: 100%;
+      max-width: 460px;
+      max-height: 88vh;
+      overflow-y: auto;
+    }
+    @media (min-width: 480px) {
+      .sheet-overlay { align-items: center; }
+      .sheet-card { border-radius: 16px; }
+    }
+    .sheet-title { font-size: 19px; font-weight: 800; color: #15161a; }
+    .sheet-addr { font-size: 13px; color: #6c757d; margin-top: 4px; overflow-wrap: anywhere; }
+    .sheet-label {
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin: 20px 0 8px;
+    }
+    .sheet-hint { font-size: 12px; color: #9aa0a6; margin-top: -4px; margin-bottom: 8px; }
+    .photo-actions { display: flex; gap: 10px; }
+    .btn-photo {
+      flex: 1;
+      padding: 16px 10px;
+      border: 1.5px dashed #c3c8ce;
+      border-radius: 12px;
+      background: #fafbfc;
+      color: #15161a;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-photo:active { background: #eef1f4; }
+    .photo-preview { margin-top: 4px; }
+    .photo-preview img {
+      width: 100%;
+      max-height: 240px;
+      object-fit: cover;
+      border-radius: 12px;
+      display: block;
+      background: #eef1f4;
+    }
+    .btn-photo-remove {
+      background: none;
+      border: none;
+      color: #b91c1c;
+      font-size: 12.5px;
+      font-weight: 700;
+      padding: 10px 0 0;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .sheet-error {
+      display: none;
+      background: #fef2f2;
+      color: #b91c1c;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 12.5px;
+      font-weight: 600;
+      margin-top: 14px;
+    }
+    .sheet-error.show { display: block; }
+    .sheet-actions { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; }
+    .btn-sheet-primary {
+      width: 100%;
+      padding: 16px;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      background: #15803d;
+      color: #ffffff;
+      font-family: inherit;
+    }
+    .btn-sheet-primary:active { background: #22c55e; }
+    .btn-sheet-primary:disabled { background: #14532d; color: #ffffff; cursor: not-allowed; }
+    .btn-sheet-secondary {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      background: #f4f5f7;
+      color: #15161a;
+      font-family: inherit;
+    }
+    .btn-sheet-secondary:active { background: #e4e6ea; }
+
+    /* Thumbnail in the driver's own job history. */
+    .history-photo {
+      margin-top: 8px;
+      width: 100%;
+      max-height: 140px;
+      object-fit: cover;
+      border-radius: 8px;
+      display: block;
+      cursor: pointer;
+      background: rgba(255,255,255,0.08);
+    }
+
+    .lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 4000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
     .info-row {
       display: flex;
       justify-content: space-between;
@@ -355,6 +493,38 @@
     <div class="history-list" id="historyList"></div>
 
   </div>
+
+  <div class="sheet-overlay" id="completeSheet">
+    <div class="sheet-card">
+      <div class="sheet-title">Mark job complete?</div>
+      <div class="sheet-addr" id="sheetAddr"></div>
+
+      <div class="sheet-label">Photo — optional</div>
+      <div class="sheet-hint">Load, site, or ticket. Skip it if the job doesn't need one.</div>
+      <div class="photo-actions" id="photoActions">
+        <button class="btn-photo" type="button" id="btnTakePhoto">Take Photo</button>
+        <button class="btn-photo" type="button" id="btnPickPhoto">Choose Photo</button>
+      </div>
+      <div class="photo-preview" id="photoPreview" style="display:none;">
+        <img id="photoImg" alt="Photo you attached to this job">
+        <button class="btn-photo-remove" type="button" id="btnRemovePhoto">Remove photo</button>
+      </div>
+
+      <div class="sheet-error" id="sheetError"></div>
+
+      <div class="sheet-actions">
+        <button class="btn-sheet-primary" type="button" id="btnConfirmComplete">Mark Job Complete</button>
+        <button class="btn-sheet-secondary" type="button" id="btnCancelComplete">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Browser fallback only. The native build goes through @capacitor/camera;
+       these keep the web app usable for testing and for a dispatcher spot-check. -->
+  <input type="file" accept="image/*" capture="environment" id="fileCamera" style="display:none;">
+  <input type="file" accept="image/*" id="filePicker" style="display:none;">
+
+  <div class="lightbox" id="lightbox"><img id="lightboxImg" alt="Job photo, full size"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
@@ -636,16 +806,31 @@
           <div class="history-item">
             <div class="addr">${escapeHtml(d.site_address)}</div>
             <div class="meta">${statusStr} · ${timeStr}</div>
+            ${d.completion_photo_path ? `<img class="history-photo" data-photo="${escapeHtml(d.completion_photo_path)}" alt="Photo attached to this job">` : ''}
             <button class="legs-toggle" data-legs="${id}">Show trip breakdown</button>
             <div class="legs-body" data-legs-body="${id}"></div>
           </div>
         `
       }).join('')
+      hydratePhotos(list)
+    }
+
+    // Signed URLs are minted after the list paints, so a slow storage call
+    // never delays the job history itself.
+    async function hydratePhotos(root) {
+      const imgs = root.querySelectorAll('img[data-photo]')
+      for (const img of imgs) {
+        const url = await signedPhotoUrl(img.dataset.photo)
+        if (url) img.src = url
+        else img.remove()
+      }
     }
 
     document.getElementById('historyList').addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-legs]')
-      if (btn) toggleLegs(btn.dataset.legs, btn)
+      if (btn) { toggleLegs(btn.dataset.legs, btn); return }
+      const img = e.target.closest('img[data-photo]')
+      if (img && img.src) openLightbox(img.src)
     })
 
     async function toggleLegs(id, btn) {
@@ -715,28 +900,236 @@
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}`, '_blank')
     }
 
-    async function markComplete(id, btn) {
+    // --- Complete a job, optionally with a photo -----------------------------
+    let pendingComplete = null      // { id, btn } while the sheet is open
+    let pendingPhotoDataUrl = null  // the chosen image, not yet uploaded
+
+    function markComplete(id, btn) {
       if (!activeDispatches.some(x => x.id === id)) return
-      // Irreversible from the driver UI and sits directly under Get Directions,
-      // which is reached for while moving. Matches dispatcher.html's Cancel.
-      if (!confirm('Mark this job complete?')) return
-      btn.disabled = true
-      btn.textContent = 'Marking complete...'
-      const { error } = await sb.from('dispatches')
-        .update({ status: 'completed', completed_at: new Date().toISOString() })
-        .eq('id', id)
+      const d = activeDispatches.find(x => x.id === id)
+      pendingComplete = { id: id, btn: btn }
+      pendingPhotoDataUrl = null
+      document.getElementById('sheetAddr').textContent = d ? d.site_address : ''
+      setPhotoPreview(null)
+      sheetError('')
+      const confirmBtn = document.getElementById('btnConfirmComplete')
+      confirmBtn.disabled = false
+      confirmBtn.textContent = 'Mark Job Complete'
+      document.getElementById('completeSheet').classList.add('open')
+    }
+
+    function closeCompleteSheet() {
+      document.getElementById('completeSheet').classList.remove('open')
+      pendingComplete = null
+      pendingPhotoDataUrl = null
+      setPhotoPreview(null)
+    }
+
+    function sheetError(msg) {
+      const el = document.getElementById('sheetError')
+      el.textContent = msg || ''
+      el.classList.toggle('show', !!msg)
+    }
+
+    function setPhotoPreview(dataUrl) {
+      const wrap = document.getElementById('photoPreview')
+      const actions = document.getElementById('photoActions')
+      if (dataUrl) {
+        document.getElementById('photoImg').src = dataUrl
+        wrap.style.display = 'block'
+        actions.style.display = 'none'
+      } else {
+        document.getElementById('photoImg').removeAttribute('src')
+        wrap.style.display = 'none'
+        actions.style.display = 'flex'
+      }
+    }
+
+    document.getElementById('btnCancelComplete').addEventListener('click', closeCompleteSheet)
+    document.getElementById('completeSheet').addEventListener('click', (e) => {
+      if (e.target.id === 'completeSheet') closeCompleteSheet()
+    })
+    document.getElementById('btnRemovePhoto').addEventListener('click', () => {
+      pendingPhotoDataUrl = null
+      setPhotoPreview(null)
+      sheetError('')
+    })
+    document.getElementById('btnTakePhoto').addEventListener('click', () => choosePhoto('camera'))
+    document.getElementById('btnPickPhoto').addEventListener('click', () => choosePhoto('library'))
+    document.getElementById('btnConfirmComplete').addEventListener('click', doComplete)
+
+    async function choosePhoto(mode) {
+      sheetError('')
+      const Camera = isNative && window.Capacitor.Plugins ? window.Capacitor.Plugins.Camera : null
+      if (Camera) {
+        try {
+          // Bounded on the device rather than after upload: drivers are on cell
+          // data, often at the edge of coverage, and a 12 MP original is a
+          // several-megabyte upload that will simply never finish out there.
+          const photo = await Camera.getPhoto({
+            quality: 70,
+            width: 1600,
+            allowEditing: false,
+            correctOrientation: true,
+            resultType: 'dataUrl',
+            source: mode === 'camera' ? 'CAMERA' : 'PHOTOS',
+            saveToGallery: false
+          })
+          if (photo && photo.dataUrl) {
+            pendingPhotoDataUrl = photo.dataUrl
+            setPhotoPreview(photo.dataUrl)
+          }
+        } catch (e) {
+          // The plugin throws on a plain user cancel too, which is not an error
+          // worth showing. Anything else is a permission problem worth naming.
+          const msg = (e && e.message) || ''
+          if (!/cancel/i.test(msg)) {
+            sheetError('Could not open the camera. Check the app has camera and photo permission in Settings.')
+          }
+        }
+        return
+      }
+      // Browser fallback.
+      document.getElementById(mode === 'camera' ? 'fileCamera' : 'filePicker').click()
+    }
+
+    ;['fileCamera', 'filePicker'].forEach(id => {
+      document.getElementById(id).addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0]
+        e.target.value = '' // let the same file be re-picked after a Remove
+        if (!file) return
+        try {
+          const raw = await fileToDataUrl(file)
+          // Only the browser path needs this — @capacitor/camera already caps
+          // the dimension and re-encodes on device.
+          pendingPhotoDataUrl = await downscaleDataUrl(raw, 1600, 0.7)
+          setPhotoPreview(pendingPhotoDataUrl)
+        } catch (err) {
+          console.error('Photo read failed', err)
+          sheetError('Could not read that photo. Try another one.')
+        }
+      })
+    })
+
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader()
+        fr.onload = () => resolve(fr.result)
+        fr.onerror = () => reject(fr.error || new Error('read failed'))
+        fr.readAsDataURL(file)
+      })
+    }
+
+    function downscaleDataUrl(dataUrl, maxDim, quality) {
+      return new Promise((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => {
+          try {
+            const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
+            if (scale === 1 && /^data:image\/jpeg/.test(dataUrl)) return resolve(dataUrl)
+            const c = document.createElement('canvas')
+            c.width = Math.round(img.width * scale)
+            c.height = Math.round(img.height * scale)
+            c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+            resolve(c.toDataURL('image/jpeg', quality))
+          } catch (e) { reject(e) }
+        }
+        img.onerror = () => reject(new Error('decode failed'))
+        img.src = dataUrl
+      })
+    }
+
+    function dataUrlToBlob(dataUrl) {
+      const comma = dataUrl.indexOf(',')
+      const meta = dataUrl.slice(0, comma)
+      const type = (meta.match(/data:([^;]+)/) || [])[1] || 'image/jpeg'
+      const bin = atob(dataUrl.slice(comma + 1))
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      return new Blob([bytes], { type: type })
+    }
+
+    // crypto.randomUUID is iOS 15.4+; this app still supports older phones in
+    // the cab, so do not depend on it for a filename.
+    function photoId() {
+      return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
+    }
+
+    async function doComplete() {
+      if (!pendingComplete) return
+      const { id, btn } = pendingComplete
+      const confirmBtn = document.getElementById('btnConfirmComplete')
+      confirmBtn.disabled = true
+      sheetError('')
+
+      let photoPath = null
+      if (pendingPhotoDataUrl) {
+        confirmBtn.textContent = 'Uploading photo...'
+        try {
+          const blob = dataUrlToBlob(pendingPhotoDataUrl)
+          // Path starts with the driver's own id — that first segment is what
+          // the storage RLS policy checks, so nothing here trusts a client
+          // field to decide who owns the object.
+          const path = `${currentUser.id}/${id}/${photoId()}.jpg`
+          const { error: upErr } = await sb.storage.from('job-photos')
+            .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: false })
+          if (upErr) throw upErr
+          photoPath = path
+        } catch (e) {
+          console.error('Photo upload failed', e)
+          // Never hold a job open because a photo would not upload. The driver
+          // is frequently in a dead zone at exactly this moment, and an
+          // uncompletable job is a far worse failure than a missing photo.
+          confirmBtn.disabled = false
+          confirmBtn.textContent = 'Complete without photo'
+          sheetError('The photo would not upload — probably no signal. Tap again to complete this job without it.')
+          pendingPhotoDataUrl = null
+          setPhotoPreview(null)
+          return
+        }
+      }
+
+      confirmBtn.textContent = 'Marking complete...'
+      const patch = { status: 'completed', completed_at: new Date().toISOString() }
+      if (photoPath) patch.completion_photo_path = photoPath
+      const { error } = await sb.from('dispatches').update(patch).eq('id', id)
+
       if (error) {
-        btn.disabled = false
-        btn.textContent = 'Mark Job Complete'
+        confirmBtn.disabled = false
+        confirmBtn.textContent = 'Mark Job Complete'
+        sheetError('Could not mark complete — no connection. Try again when you have signal.')
         setOffline(true, 'Could not mark complete — no connection. Try again when you have signal.')
         return
       }
+
       setOffline(false)
+      closeCompleteSheet()
+      if (btn) { btn.disabled = true; btn.textContent = 'Marking complete...' }
       historyLoaded = false
       activeDispatches = activeDispatches.filter(x => x.id !== id)
       renderDispatches()
       loadDispatch()
     }
+
+    // --- Viewing a photo -----------------------------------------------------
+    // Objects are private, so every view needs a short-lived signed URL.
+    const signedUrlCache = {}
+    async function signedPhotoUrl(path) {
+      if (signedUrlCache[path]) return signedUrlCache[path]
+      const { data, error } = await sb.storage.from('job-photos').createSignedUrl(path, 3600)
+      if (error || !data) return null
+      signedUrlCache[path] = data.signedUrl
+      return data.signedUrl
+    }
+
+    function openLightbox(src) {
+      document.getElementById('lightboxImg').src = src
+      document.getElementById('lightbox').classList.add('open')
+    }
+    document.getElementById('lightbox').addEventListener('click', () => {
+      document.getElementById('lightbox').classList.remove('open')
+      document.getElementById('lightboxImg').removeAttribute('src')
+    })
 
     async function toggleTracking() {
       tracking ? stopTracking() : startTracking()

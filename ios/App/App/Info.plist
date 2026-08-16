@@ -26,6 +26,16 @@
 	<string>Cooney's Trucking uses your location to show dispatch your truck's position on the live fleet map.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Cooney's Trucking tracks your truck's location during your shift, including while the app is in the background, so dispatch can see live fleet positions.</string>
+	<!-- Job-completion photo (@capacitor/camera). Only the two strings the app
+	     actually exercises are declared: it takes a new photo, or picks an
+	     existing one. NSPhotoLibraryAddUsageDescription is deliberately NOT
+	     here — the app never writes back to the camera roll (saveToGallery is
+	     off), and declaring a permission you do not use invites an App Review
+	     question with no upside. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Cooney's Trucking lets you attach a photo of the load or the site when you mark a job complete.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Cooney's Trucking lets you attach an existing photo from your library when you mark a job complete.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
