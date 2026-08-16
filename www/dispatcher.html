@@ -158,6 +158,20 @@
     .dispatch-info { flex: 1; min-width: 0; }
     .dispatch-info .addr { font-size: 13px; font-weight: 600; color: #15161a; overflow-wrap: anywhere; }
     .dispatch-info .meta { font-size: 11px; color: #9aa0a6; }
+    /* Explicit affordance for the trip breakdown. The whole row is tappable
+       too, but a dispatcher should not have to guess that. */
+    .btn-legs {
+      background: #eaf1ff;
+      border: 1px solid #cfe0ff;
+      color: var(--brand-blue);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .btn-legs:active { background: #d9e7ff; }
     .btn-cancel {
       background: none;
       border: 1px solid #fca5a5;
@@ -302,6 +316,90 @@
       text-align: center;
       padding: 14px 0 2px;
     }
+
+    /* --- Trip breakdown -----------------------------------------------------
+       The reason this screen exists. A bulk-haul dispatch is not one trip: the
+       driver shuttles the same two points from 07:00 to 17:00 and often never
+       marks the job complete, so "on job: 9h 40m" is worthless. Each run gets
+       its own row with its own average speed, derived from the GPS trail with
+       no extra taps from the driver. */
+    .scope-row { display: flex; gap: 6px; margin-top: 18px; }
+    .scope-btn {
+      flex: 1;
+      background: #f4f5f7;
+      border: 1.5px solid transparent;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #6c757d;
+      cursor: pointer;
+    }
+    .scope-btn.active { background: #eaf1ff; border-color: var(--brand-blue); color: var(--brand-blue); }
+
+    .legs-summary-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+    .legs-stat {
+      flex: 1 1 84px;
+      background: #f4f5f7;
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .legs-stat .k {
+      display: block;
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.7px;
+      text-transform: uppercase;
+      color: #9aa0a6;
+      margin-bottom: 3px;
+    }
+    .legs-stat .v { font-size: 16px; font-weight: 800; color: #15161a; font-variant-numeric: tabular-nums; }
+    .legs-stat.warn { background: #fef3c7; }
+    .legs-stat.warn .v { color: #92400e; }
+    .legs-stat.warn .k { color: #b45309; }
+
+    .legs-note { font-size: 11.5px; color: #9aa0a6; margin-top: 10px; }
+
+    .leg-list { margin-top: 14px; }
+    .leg-row {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      padding: 9px 0 9px 12px;
+      font-size: 12.5px;
+      border-left: 3px solid #e2e8f0;
+      margin-left: 2px;
+    }
+    .leg-row + .leg-row { border-top: 1px solid #f1f3f5; }
+    .leg-row.drive { border-left-color: var(--brand-blue); }
+    .leg-row.stop { border-left-color: var(--stop-neutral); }
+    .leg-row.stop.long { border-left-color: var(--stop-long); background: #fffbeb; }
+    .leg-row.stop.very-long { border-left-color: var(--stop-very-long); background: #fef2f2; }
+    .leg-row.gap { border-left-style: dashed; border-left-color: #c3c8ce; }
+    .leg-row .when { color: #9aa0a6; flex-shrink: 0; font-variant-numeric: tabular-nums; font-size: 11.5px; }
+    .leg-row .what { flex: 1; min-width: 0; color: #15161a; font-weight: 600; overflow-wrap: anywhere; }
+    .leg-row .what .sub { display: block; font-weight: 500; color: #9aa0a6; font-size: 11px; margin-top: 1px; }
+    .leg-row .speed { flex-shrink: 0; font-weight: 800; color: #15161a; font-variant-numeric: tabular-nums; }
+    .leg-row.stop .speed, .leg-row.gap .speed { color: #6c757d; font-weight: 700; }
+    .leg-row.stop.long .speed { color: #92400e; }
+    .leg-row.stop.very-long .speed { color: #b91c1c; }
+
+    .idle-banner {
+      display: none;
+      margin-top: 12px;
+      background: #fef3c7;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #92400e;
+    }
+    .idle-banner.show { display: block; }
   </style>
 </head>
 <body>
@@ -371,13 +469,20 @@
       <div class="modal-driver" id="modalDriver"></div>
       <div class="modal-notes" id="modalNotes" style="display:none;"></div>
       <div class="modal-timeline" id="modalTimeline"></div>
+      <div class="scope-row" id="modalScope">
+        <button class="scope-btn active" data-scope="job">This job</button>
+        <button class="scope-btn" data-scope="day">Whole day</button>
+      </div>
+      <div class="idle-banner" id="modalIdleBanner"></div>
       <div class="modal-route-map" id="modalRouteMap"></div>
       <div class="modal-empty-route" id="modalEmptyRoute">No GPS data recorded for this job.</div>
+      <div id="modalLegs"></div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="legs.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -387,9 +492,22 @@
     let driverMap = {}
     let historyLoaded = false
     let historyDriverFilter = null
+    // Every job we have rendered, active or historical — the detail modal opens
+    // from both lists, and the active one is the important case: Matt's drivers
+    // shuttle all day on a job that is still open.
+    let jobById = {}
     let historyById = {}
     let detailMap = null
-    let detailMapLine = null
+    let detailLayers = null
+    let openJobId = null
+    let openScope = 'job'
+    let detailSeq = 0
+    // Leaflet paints polyline colour as an SVG presentation attribute, where
+    // var() is not reliably supported (see the same note in map.html). Literals.
+    const BRAND_BLUE = '#004AAD'
+    const STOP_LONG = '#d97706'
+    const STOP_VERY_LONG = '#ef4444'
+    const STOP_NEUTRAL = '#6b7280'
     let historyVisible = false
     let dispatchChannel = null
     // Monotonic guards: realtime, the 20s poll and post-action reloads can all be
@@ -482,7 +600,7 @@
         itemsEl.innerHTML = '<div class="empty-state">No job history yet</div>'
         return
       }
-      data.forEach(d => { historyById[d.id] = d })
+      data.forEach(d => { historyById[d.id] = d; jobById[d.id] = d })
       itemsEl.innerHTML = data.map(d => {
         const driver = driverMap[d.driver_id]
         const unit = driver?.unit_number || '—'
@@ -513,9 +631,25 @@
       return Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm'
     }
 
-    async function openHistoryDetail(id) {
-      const d = historyById[id]
+    // Local midnight to now (or to end of that day). "Whole day" exists because
+    // a shuttle driver often never marks the job complete — the job window and
+    // the shift are different questions and dispatch needs both.
+    function dayWindow(refIso) {
+      const ref = new Date(refIso || Date.now())
+      const start = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate(), 0, 0, 0, 0)
+      const end = new Date(start.getTime() + 24 * 3600 * 1000)
+      return { from: start.toISOString(), to: new Date(Math.min(end.getTime(), Date.now())).toISOString() }
+    }
+
+    function openHistoryDetail(id) { openJobDetail(id, 'job') }
+
+    async function openJobDetail(id, scope) {
+      const d = jobById[id]
       if (!d) return
+      openJobId = id
+      openScope = scope || 'job'
+      const seq = ++detailSeq
+
       const driver = driverMap[d.driver_id]
       const unit = driver?.unit_number || '—'
       const name = driver?.full_name || 'Unknown driver'
@@ -527,38 +661,149 @@
       if (d.notes) { notesEl.textContent = d.notes; notesEl.style.display = 'block' }
       else { notesEl.style.display = 'none' }
 
-      const duration = fmtDuration(d.accepted_at, d.completed_at)
+      const stillOpen = d.status === 'active'
+      const duration = fmtDuration(d.accepted_at, d.completed_at || (stillOpen ? new Date().toISOString() : null))
       document.getElementById('modalTimeline').innerHTML = `
         <div class="modal-timeline-row"><span class="label">Sent</span><span class="value">${fmtTime(d.created_at)}</span></div>
         <div class="modal-timeline-row"><span class="label">Accepted</span><span class="value">${fmtTime(d.accepted_at)}</span></div>
-        <div class="modal-timeline-row"><span class="label">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span><span class="value">${fmtTime(d.completed_at)}</span></div>
-        ${duration ? `<div class="modal-timeline-row"><span class="label">On job</span><span class="value">${duration}</span></div>` : ''}
+        <div class="modal-timeline-row"><span class="label">${stillOpen ? 'Status' : (d.status === 'cancelled' ? 'Cancelled' : 'Completed')}</span><span class="value">${stillOpen ? 'Still open' : fmtTime(d.completed_at)}</span></div>
+        ${duration ? `<div class="modal-timeline-row"><span class="label">${stillOpen ? 'Open for' : 'On job'}</span><span class="value">${duration}</span></div>` : ''}
       `
+
+      Array.from(document.getElementById('modalScope').children).forEach(b => {
+        b.classList.toggle('active', b.dataset.scope === openScope)
+      })
 
       document.getElementById('historyModalOverlay').classList.add('open')
 
-      // Route breadcrumb: actual GPS pings for this driver across the job window.
-      const routeStart = d.accepted_at || d.created_at
-      const routeEnd = d.completed_at || new Date().toISOString()
       const mapEl = document.getElementById('modalRouteMap')
       const emptyEl = document.getElementById('modalEmptyRoute')
+      const legsEl = document.getElementById('modalLegs')
+      const bannerEl = document.getElementById('modalIdleBanner')
       mapEl.style.display = 'none'
       emptyEl.style.display = 'none'
+      bannerEl.classList.remove('show')
+      legsEl.innerHTML = '<div class="legs-note">Working out the legs from the GPS trail...</div>'
 
-      const { data: pings } = await sb.from('location_updates')
-        .select('lat, lng, created_at')
-        .eq('user_id', d.driver_id)
-        .gte('created_at', routeStart)
-        .lte('created_at', routeEnd)
-        .order('created_at', { ascending: true })
+      let from, to
+      if (openScope === 'day') {
+        const w = dayWindow(d.completed_at || d.accepted_at || d.created_at)
+        from = w.from; to = w.to
+      } else {
+        from = new Date(d.accepted_at || d.created_at).toISOString()
+        to = new Date(d.completed_at || Date.now()).toISOString()
+      }
+
+      let pings, truncated
+      try {
+        const res = await TruckLegs.fetchPings(sb, d.driver_id, from, to)
+        pings = res.rows; truncated = res.truncated
+      } catch (e) {
+        console.error('Ping fetch failed', e)
+        if (seq !== detailSeq) return
+        legsEl.innerHTML = '<div class="legs-note">Could not load the GPS trail. Close and reopen to retry.</div>'
+        return
+      }
+      // A slower earlier open must never paint over a newer one.
+      if (seq !== detailSeq) return
 
       if (!pings || pings.length === 0) {
         emptyEl.style.display = 'block'
+        legsEl.innerHTML = ''
         return
       }
 
+      const anchors = (d.lat != null && d.lng != null)
+        ? [{ lat: d.lat, lng: d.lng, label: shortAddress(d.site_address) }] : []
+      const r = TruckLegs.segment(pings, { anchors })
+
+      legsEl.innerHTML = renderLegs(r, truncated)
+      drawRoute(r)
+      loadIdleBanner(d.driver_id, seq)
+    }
+
+    // Is this truck sitting RIGHT NOW? Written by the check-idle-drivers cron,
+    // not computed here — the whole point of that job is that it runs when
+    // nobody has this screen open.
+    async function loadIdleBanner(driverId, seq) {
+      const { data, error } = await sb.from('idle_events')
+        .select('started_at, last_ping_at, notified_at')
+        .eq('user_id', driverId)
+        .is('ended_at', null)
+        .limit(1)
+      if (error || seq !== detailSeq) return
+      const ev = data && data[0]
+      if (!ev) return
+      // An open event whose truck stopped reporting is not "parked now".
+      if (Date.now() - new Date(ev.last_ping_at).getTime() > 12 * 60 * 1000) return
+      const mins = Math.round((new Date(ev.last_ping_at) - new Date(ev.started_at)) / 60000)
+      const el = document.getElementById('modalIdleBanner')
+      el.textContent = `Parked right now — ${mins} min and counting`
+        + (ev.notified_at ? '. Driver has been alerted.' : '.')
+      el.classList.add('show')
+    }
+
+    // "1400 84 St SE, Calgary, AB" -> "1400 84 St SE". A full postal address
+    // inside a leg row pushes the speed off the edge of the phone.
+    function shortAddress(a) {
+      return String(a || '').split(',')[0].trim() || 'Site'
+    }
+
+    function renderLegs(r, truncated) {
+      const s = r.summary
+      if (!s.legCount && !s.stopCount) {
+        return '<div class="legs-note">Not enough GPS to break this into legs yet.</div>'
+      }
+      const stats = `
+        <div class="legs-summary-row">
+          <div class="legs-stat"><span class="k">Legs</span><span class="v">${s.legCount}</span></div>
+          <div class="legs-stat"><span class="k">Driving</span><span class="v">${TruckLegs.fmtDuration(s.drivingMs)}</span></div>
+          <div class="legs-stat"><span class="k">Avg speed</span><span class="v">${TruckLegs.fmtSpeed(s.avgKph)}</span></div>
+          <div class="legs-stat${s.longStopCount ? ' warn' : ''}"><span class="k">Stopped</span><span class="v">${TruckLegs.fmtDuration(s.stoppedMs)}</span></div>
+        </div>`
+
+      const rows = r.segments.map(seg => {
+        const when = `${TruckLegs.fmtClock(seg.startAt)}–${TruckLegs.fmtClock(seg.endAt)}`
+        if (seg.type === 'leg') {
+          const route = (seg.fromLabel && seg.toLabel)
+            ? `${escapeHtml(seg.fromLabel)} → ${escapeHtml(seg.toLabel)}` : 'Driving'
+          return `<div class="leg-row drive">
+              <span class="when">${when}</span>
+              <span class="what">${route}<span class="sub">${TruckLegs.fmtDuration(seg.durationMs)} · ${TruckLegs.fmtDistance(seg.distanceM)} · top ${TruckLegs.fmtSpeed(seg.maxKph)}</span></span>
+              <span class="speed">${TruckLegs.fmtSpeed(seg.avgKph)}</span>
+            </div>`
+        }
+        if (seg.type === 'stop') {
+          const cls = seg.veryLong ? ' very-long' : (seg.long ? ' long' : '')
+          return `<div class="leg-row stop${cls}">
+              <span class="when">${when}</span>
+              <span class="what">Stopped${seg.stopLabel ? ' at ' + escapeHtml(seg.stopLabel) : ''}</span>
+              <span class="speed">${TruckLegs.fmtDuration(seg.durationMs)}</span>
+            </div>`
+        }
+        return `<div class="leg-row gap">
+            <span class="when">${when}</span>
+            <span class="what">No GPS recorded<span class="sub">Out of coverage, app closed, or a build without the parked heartbeat</span></span>
+            <span class="speed">${TruckLegs.fmtDuration(seg.durationMs)}</span>
+          </div>`
+      }).join('')
+
+      const notes = []
+      if (s.noDataMs > 0) {
+        notes.push(`${TruckLegs.fmtDuration(s.noDataMs)} of this window has no GPS. Distance and average speed exclude it rather than guessing a route across it.`)
+      }
+      if (truncated) notes.push('Very long shift — only the earliest part of the trail was read.')
+      const noteHtml = notes.length ? `<div class="legs-note">${notes.map(escapeHtml).join(' ')}</div>` : ''
+
+      return stats + '<div class="leg-list">' + rows + '</div>' + noteHtml
+    }
+
+    // Draw driving as solid brand-blue runs and each stop as a dot sized by how
+    // long the truck sat there, so a long stop is visible at a glance without
+    // reading a single row.
+    function drawRoute(r) {
+      const mapEl = document.getElementById('modalRouteMap')
       mapEl.style.display = 'block'
-      const points = pings.map(p => [parseFloat(p.lat), parseFloat(p.lng)])
 
       if (!detailMap) {
         detailMap = L.map('modalRouteMap')
@@ -568,19 +813,46 @@
         }).addTo(detailMap)
       }
       detailMap.invalidateSize()
-      if (detailMapLine) { detailMap.removeLayer(detailMapLine) }
+      if (detailLayers) detailMap.removeLayer(detailLayers)
+      detailLayers = L.layerGroup().addTo(detailMap)
 
-      if (points.length === 1) {
-        detailMapLine = L.circleMarker(points[0], { radius: 6, color: 'var(--brand-blue)' }).addTo(detailMap)
-        detailMap.setView(points[0], 15)
-      } else {
-        detailMapLine = L.polyline(points, { color: 'var(--brand-blue)', weight: 4, opacity: 0.8 }).addTo(detailMap)
-        detailMap.fitBounds(detailMapLine.getBounds(), { padding: [20, 20] })
-      }
+      const all = []
+      r.segments.forEach(seg => {
+        if (seg.type === 'leg') {
+          const pts = r.points.slice(seg.startIndex, seg.endIndex + 1).map(p => [p.lat, p.lng])
+          if (pts.length > 1) {
+            L.polyline(pts, { color: BRAND_BLUE, weight: 4, opacity: 0.85 }).addTo(detailLayers)
+            pts.forEach(p => all.push(p))
+          }
+        } else if (seg.type === 'stop' && seg.lat != null) {
+          const color = seg.veryLong ? STOP_VERY_LONG : (seg.long ? STOP_LONG : STOP_NEUTRAL)
+          const mins = seg.durationMs / 60000
+          const radius = Math.max(5, Math.min(14, 4 + Math.sqrt(mins)))
+          L.circleMarker([seg.lat, seg.lng], {
+            radius: radius, color: '#ffffff', weight: 2, fillColor: color, fillOpacity: 0.9
+          }).addTo(detailLayers)
+            .bindPopup(`<b>${escapeHtml(seg.stopLabel || 'Stop')}</b><br>Stopped ${TruckLegs.fmtDuration(seg.durationMs)}<br>${TruckLegs.fmtClock(seg.startAt)}–${TruckLegs.fmtClock(seg.endAt)}`)
+          all.push([seg.lat, seg.lng])
+        }
+      })
+
+      if (all.length === 1) detailMap.setView(all[0], 15)
+      else if (all.length > 1) detailMap.fitBounds(L.latLngBounds(all), { padding: [20, 20] })
     }
+
+    document.getElementById('modalScope').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-scope]')
+      if (!btn || !openJobId) return
+      if (btn.dataset.scope === openScope) return
+      openJobDetail(openJobId, btn.dataset.scope)
+    })
 
     function closeHistoryModal() {
       document.getElementById('historyModalOverlay').classList.remove('open')
+      openJobId = null
+      // Invalidate any in-flight fetch so a late response cannot repaint a
+      // closed modal with the wrong job.
+      detailSeq++
     }
 
     async function loadDrivers() {
@@ -740,6 +1012,7 @@
         return
       }
 
+      data.forEach(d => { jobById[d.id] = d })
       list.innerHTML = data.map(d => {
         const driver = driverMap[d.driver_id]
         const unit = driver?.unit_number || '—'
@@ -750,13 +1023,14 @@
           ? '<span class="status-pill accepted">Accepted</span>'
           : '<span class="status-pill pending">Pending</span>'
         return `
-          <div class="dispatch-item ${accepted ? 'accepted' : 'pending-accept'}">
+          <div class="dispatch-item clickable ${accepted ? 'accepted' : 'pending-accept'}" data-open="${escapeHtml(d.id)}">
             <span class="dispatch-unit">U${escapeHtml(unit)}</span>
             <div class="dispatch-info">
               <div class="addr">${escapeHtml(d.site_address)}</div>
               <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
             </div>
             ${pill}
+            <button class="btn-legs" data-action="legs" data-id="${escapeHtml(d.id)}">Trips</button>
             <button class="btn-cancel" data-action="cancel" data-id="${escapeHtml(d.id)}">Cancel</button>
           </div>
         `
@@ -769,8 +1043,14 @@
     // handler is compiled, so an escaped quote still breaks out. Safe here only
     // because d.id is a uuid column; this removes the dependency on that.
     document.getElementById('activeList').addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-action="cancel"]')
-      if (btn) cancelDispatch(btn.dataset.id)
+      const btn = e.target.closest('button[data-action]')
+      if (btn && btn.dataset.action === 'cancel') { cancelDispatch(btn.dataset.id); return }
+      if (btn && btn.dataset.action === 'legs') { openJobDetail(btn.dataset.id, 'job'); return }
+      // An ACTIVE job is the important case for the leg breakdown: a shuttle
+      // driver runs it all day and often never marks it complete, so waiting
+      // for it to reach History would mean never seeing the legs at all.
+      const row = e.target.closest('.dispatch-item[data-open]')
+      if (row) openJobDetail(row.dataset.open, 'job')
     })
 
     async function cancelDispatch(id) {

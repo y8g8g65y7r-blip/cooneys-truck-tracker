@@ -81,7 +81,23 @@
     }
     .roster-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
     .roster-chip .dot.offline { background: #6c757d; }
+    .roster-chip .dot.idle { background: #f59e0b; }
+    .roster-chip.idle { background: rgba(245,158,11,0.16); }
     .roster-chip .time { color: rgba(255,255,255,0.4); font-size: 10px; font-weight: 400; }
+    .roster-chip.idle .time { color: #fbbf24; font-weight: 700; }
+
+    /* A stopped truck is the thing dispatch is here to notice, so it gets its
+       own line above the roster rather than being one amber dot among ten. */
+    .idle-strip {
+      background: #78350f;
+      color: #fef3c7;
+      padding: 9px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      display: none;
+      flex-shrink: 0;
+    }
+    .idle-strip.show { display: block; }
   </style>
 </head>
 <body>
@@ -100,6 +116,7 @@
 
   <div id="map"></div>
 
+  <div class="idle-strip" id="idleStrip"></div>
   <div class="roster" id="roster"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -129,6 +146,11 @@
     // stroke:none, i.e. an INVISIBLE trail. Use the literal; keep theme.css as
     // the source of truth for every context where var() is actually specified.
     const BRAND_BLUE = '#004AAD'
+    const IDLE_AMBER = '#d97706'
+    // An open idle_events row whose last ping is older than this is not a
+    // parked truck, it is a phone that stopped reporting — a different problem,
+    // and one this flag must not silently mislabel.
+    const IDLE_FRESH_MS = 12 * 60 * 1000
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -169,7 +191,7 @@
       // shown by colour: live = brand blue, stale = grey.
       const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-      const [locRes, profRes, dispRes] = await Promise.all([
+      const [locRes, profRes, dispRes, idleRes] = await Promise.all([
         sb.from('location_updates')
           .select('*')
           .gte('created_at', dayAgo)
@@ -178,7 +200,10 @@
         // NOT time-bounded: dispatcher.html lists every active job regardless of
         // age, and a map that silently omits one the board still shows is worse
         // than a stale pin. Ageing stale jobs out belongs in a server-side sweep.
-        sb.from('dispatches').select('*').eq('status', 'active')
+        sb.from('dispatches').select('*').eq('status', 'active'),
+        // Open idle events, written by the check-idle-drivers cron. Read, not
+        // computed: the detection has to run whether or not this page is open.
+        sb.from('idle_events').select('user_id, started_at, last_ping_at, notified_at').is('ended_at', null)
       ])
 
       // supabase-js RESOLVES with {data:null, error} on failure. Rendering that
@@ -191,6 +216,17 @@
       const locData = locRes.data
       const profileData = profRes.data
       const dispatchData = dispRes.data
+      // Non-fatal on its own: an idle_events failure (or a project where 0006
+      // has not run yet) must not blank the whole board. Degrade to no flags.
+      if (idleRes.error) console.error('Idle events unavailable', idleRes.error)
+      const idleByUser = {}
+      ;(idleRes.data || []).forEach(e => {
+        if (Date.now() - new Date(e.last_ping_at).getTime() > IDLE_FRESH_MS) return
+        idleByUser[e.user_id] = {
+          minutes: Math.max(0, Math.round((new Date(e.last_ping_at) - new Date(e.started_at)) / 60000)),
+          notified: !!e.notified_at
+        }
+      })
 
       const profileMap = {}
       profileData?.forEach(p => { profileMap[p.id] = p })
@@ -241,10 +277,15 @@
         const lng = parseFloat(loc.lng)
         const ageMs = now - new Date(loc.created_at).getTime()
         const isLive = ageMs < LIVE_MS
-        const color = isLive ? 'var(--brand-blue)' : '#6c757d'
+        const idle = isLive ? idleByUser[uid] : null
+        // Three states, not two: reporting and moving (brand blue), reporting
+        // but parked past the threshold (amber), not reporting at all (grey).
+        // Conflating the last two is exactly what made a parked truck and a
+        // dead phone look identical before the heartbeat existed.
+        const color = idle ? IDLE_AMBER : (isLive ? 'var(--brand-blue)' : '#6c757d')
         const timeStr = new Date(loc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         const speedStr = loc.speed != null ? ` · ${Math.round(loc.speed * 3.6)} km/h` : ''
-        const freshStr = isLive ? 'Live now' : 'Last seen ' + relTime(ageMs)
+        const freshStr = idle ? `Parked ${idle.minutes} min` : (isLive ? 'Live now' : 'Last seen ' + relTime(ageMs))
 
         const icon = L.divIcon({
           className: '',
@@ -254,6 +295,7 @@
         })
 
         const popup = `<b>Unit ${escapeHtml(unit)}</b> — ${escapeHtml(name)}<br>${freshStr} (${timeStr})${speedStr}<br>±${Math.round(loc.accuracy || 0)}m accuracy`
+          + (idle ? `<br><b style="color:#b45309">Not moved for ${idle.minutes} min</b>${idle.notified ? ' — driver alerted' : ''}` : '')
 
         if (markers[uid]) {
           markers[uid].setLatLng([lat, lng])
@@ -340,16 +382,29 @@
         roster.innerHTML = rosterUsers.map(uid => {
           const loc = latestByUser[uid]
           const active = (now - new Date(loc.created_at).getTime()) < LIVE_MS
+          const idle = active ? idleByUser[uid] : null
           const profile = profileMap[uid]
           const unit = profile?.unit_number || '?'
           const name = profile?.full_name || 'Unknown'
           const timeStr = new Date(loc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          return `<div class="roster-chip">
-            <div class="dot${active ? '' : ' offline'}"></div>
+          return `<div class="roster-chip${idle ? ' idle' : ''}">
+            <div class="dot${idle ? ' idle' : (active ? '' : ' offline')}"></div>
             Unit ${escapeHtml(unit)} — ${escapeHtml(name)}
-            <span class="time">${active ? 'Live' : timeStr}</span>
+            <span class="time">${idle ? 'Parked ' + idle.minutes + 'm' : (active ? 'Live' : timeStr)}</span>
           </div>`
         }).join('')
+      }
+
+      // One clear line for the thing dispatch is actually watching for.
+      const idleList = rosterUsers
+        .filter(uid => idleByUser[uid] && (now - new Date(latestByUser[uid].created_at).getTime()) < LIVE_MS)
+        .map(uid => 'Unit ' + ((profileMap[uid] || {}).unit_number || '?') + ' (' + idleByUser[uid].minutes + ' min)')
+      const strip = document.getElementById('idleStrip')
+      if (idleList.length) {
+        strip.textContent = (idleList.length === 1 ? 'Stopped: ' : 'Stopped (' + idleList.length + '): ') + idleList.join(', ')
+        strip.classList.add('show')
+      } else {
+        strip.classList.remove('show')
       }
 
       document.getElementById('refreshInfo').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`

@@ -88,6 +88,15 @@
       letter-spacing: 2px;
     }
     .status-ring.active .status-label { color: #22c55e; }
+    /* Parked past the alert threshold. Amber, and deliberately NOT pulsing —
+       the pulse means "we are hearing from you"; a stationary truck should
+       look settled, not alarming. It is a heads-up, not a violation. */
+    .status-ring.parked {
+      border-color: #d97706;
+      box-shadow: none;
+      animation: none;
+    }
+    .status-ring.parked .status-label { color: #f59e0b; }
 
     .card {
       background: #fff;
@@ -212,6 +221,50 @@
     .history-item .meta { color: rgba(255,255,255,0.4); }
     .history-item .status-cancelled { color: #f87171; }
 
+    /* Trip breakdown. A bulk-haul job is a shuttle, not a trip: the driver
+       runs the same two points all day. One "on job: 9h" line tells them
+       nothing, so each run gets its own row with its own average speed. */
+    .legs-toggle {
+      background: none;
+      border: none;
+      color: var(--brand-blue-light);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 0 0;
+      cursor: pointer;
+    }
+    .legs-body { display: none; margin-top: 10px; }
+    .legs-body.open { display: block; }
+    .legs-summary {
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0.3px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      margin-bottom: 8px;
+    }
+    .leg-row {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      padding: 6px 0;
+      font-size: 12px;
+      border-left: 2px solid rgba(255,255,255,0.12);
+      padding-left: 10px;
+      margin-left: 2px;
+    }
+    .leg-row.drive { border-left-color: var(--brand-blue-line); }
+    .leg-row.stop { border-left-color: var(--stop-neutral); }
+    .leg-row.stop.long { border-left-color: var(--stop-long); }
+    .leg-row.stop.very-long { border-left-color: var(--stop-very-long); }
+    .leg-row.gap { border-left-color: transparent; border-left-style: dashed; border-left-color: rgba(255,255,255,0.25); }
+    .leg-row .when { color: rgba(255,255,255,0.35); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .leg-row .what { flex: 1; min-width: 0; color: rgba(255,255,255,0.85); }
+    .leg-row .what .sub { display: block; color: rgba(255,255,255,0.4); font-size: 11px; }
+    .leg-row .speed { flex-shrink: 0; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; }
+    .leg-row.stop .speed { color: rgba(255,255,255,0.45); font-weight: 700; }
+
     .btn-directions {
       width: 100%;
       padding: 20px;
@@ -305,6 +358,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="legs.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
@@ -312,12 +366,31 @@
     const PushNotifications = isNative ? window.Capacitor.Plugins.PushNotifications : null
     let currentUser = null
     let historyLoaded = false
+    let historyById = {}
     let tracking = false
     let watchId = null
     let bgWatcherId = null
-    let sendInterval = null
+    let heartbeatTimer = null
     let wakeLock = null
     let lastPosition = null
+
+    // --- Parked heartbeat ---------------------------------------------------
+    // distanceFilter is metres-based, so a parked truck used to write NOTHING:
+    // the app went completely silent for the whole time it was sitting at a
+    // pit, a site, or wherever the driver decided to sit. That silence is
+    // indistinguishable from a dead phone, and it made per-leg times and idle
+    // detection impossible. So while the watcher is quiet we re-log the LAST
+    // KNOWN fix on a timer — presence, not a fresh (expensive) GPS lock.
+    const HEARTBEAT_MS = 90 * 1000       // how often a parked truck reports in
+    const HEARTBEAT_TICK_MS = 30 * 1000  // how often we check whether one is due
+    const BROWSER_MIN_MOVE_M = 40        // mirrors the native distanceFilter
+    const PARKED_NOTICE_MS = 10 * 60 * 1000 // matches the server-side idle alert
+    const PARKED_RADIUS_M = 150             // ...and its dwell radius
+    let lastFix = null        // newest known coordinates, movement or heartbeat
+    let lastSentAt = 0        // when we last wrote a row
+    let lastSentFix = null    // the coordinates of that row
+    let parkedAnchor = null   // where the truck settled
+    let parkedSince = 0       // ...and when
     // ALL open jobs, not just the newest — a second dispatch must never hide the
     // first. Renders as a single card when there is only one, as today.
     let activeDispatches = []
@@ -553,15 +626,83 @@
         list.innerHTML = '<div class="history-item">No past jobs yet</div>'
         return
       }
+      historyById = {}
+      data.forEach(d => { historyById[d.id] = d })
       list.innerHTML = data.map(d => {
         const timeStr = new Date(d.completed_at || d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         const statusStr = d.status === 'cancelled' ? '<span class="status-cancelled">Cancelled</span>' : 'Completed'
+        const id = escapeHtml(d.id)
         return `
           <div class="history-item">
             <div class="addr">${escapeHtml(d.site_address)}</div>
             <div class="meta">${statusStr} · ${timeStr}</div>
+            <button class="legs-toggle" data-legs="${id}">Show trip breakdown</button>
+            <div class="legs-body" data-legs-body="${id}"></div>
           </div>
         `
+      }).join('')
+    }
+
+    document.getElementById('historyList').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-legs]')
+      if (btn) toggleLegs(btn.dataset.legs, btn)
+    })
+
+    async function toggleLegs(id, btn) {
+      const body = document.querySelector('[data-legs-body="' + CSS.escape(id) + '"]')
+      if (!body) return
+      const open = body.classList.toggle('open')
+      btn.textContent = open ? 'Hide trip breakdown' : 'Show trip breakdown'
+      if (!open || body.dataset.loaded === '1') return
+      const d = historyById[id]
+      if (!d) return
+      body.innerHTML = '<div class="legs-summary">Working out your trips...</div>'
+      try {
+        const from = new Date(d.accepted_at || d.created_at).toISOString()
+        const to = new Date(d.completed_at || Date.now()).toISOString()
+        const { rows } = await TruckLegs.fetchPings(sb, currentUser.id, from, to)
+        const anchors = (d.lat != null && d.lng != null)
+          ? [{ lat: d.lat, lng: d.lng, label: 'Site' }] : []
+        body.innerHTML = renderLegs(TruckLegs.segment(rows, { anchors }))
+        body.dataset.loaded = '1'
+      } catch (err) {
+        console.error('Leg breakdown failed', err)
+        body.innerHTML = '<div class="legs-summary">Could not load your trips — tap again when you have signal.</div>'
+      }
+    }
+
+    function renderLegs(r) {
+      const s = r.summary
+      if (!s.legCount && !s.stopCount) {
+        return '<div class="legs-summary">No GPS recorded for this job.</div>'
+      }
+      const head = `<div class="legs-summary">${s.legCount} trip${s.legCount === 1 ? '' : 's'} · `
+        + `${TruckLegs.fmtDuration(s.drivingMs)} driving · ${TruckLegs.fmtDistance(s.distanceM)} · `
+        + `${TruckLegs.fmtSpeed(s.avgKph)} average</div>`
+      return head + r.segments.map(seg => {
+        const when = `${TruckLegs.fmtClock(seg.startAt)}–${TruckLegs.fmtClock(seg.endAt)}`
+        if (seg.type === 'leg') {
+          const route = (seg.fromLabel && seg.toLabel)
+            ? `${escapeHtml(seg.fromLabel)} → ${escapeHtml(seg.toLabel)}` : 'Driving'
+          return `<div class="leg-row drive">
+              <span class="when">${when}</span>
+              <span class="what">${route}<span class="sub">${TruckLegs.fmtDuration(seg.durationMs)} · ${TruckLegs.fmtDistance(seg.distanceM)}</span></span>
+              <span class="speed">${TruckLegs.fmtSpeed(seg.avgKph)}</span>
+            </div>`
+        }
+        if (seg.type === 'stop') {
+          const cls = seg.veryLong ? ' very-long' : (seg.long ? ' long' : '')
+          return `<div class="leg-row stop${cls}">
+              <span class="when">${when}</span>
+              <span class="what">Stopped${seg.stopLabel ? ' at ' + escapeHtml(seg.stopLabel) : ''}</span>
+              <span class="speed">${TruckLegs.fmtDuration(seg.durationMs)}</span>
+            </div>`
+        }
+        return `<div class="leg-row gap">
+            <span class="when">${when}</span>
+            <span class="what">No GPS recorded<span class="sub">Phone out of coverage or app closed</span></span>
+            <span class="speed">${TruckLegs.fmtDuration(seg.durationMs)}</span>
+          </div>`
       }).join('')
     }
 
@@ -613,8 +754,16 @@
               requestPermissions: true,
               stale: false,
               // Metres between updates, not a fixed timer — fires roughly every
-              // 3-10s at normal driving speeds, and goes quiet automatically
-              // while parked instead of draining the battery for no reason.
+              // 3-10s at normal driving speeds and goes silent while parked.
+              // That silence used to mean the app reported NOTHING for a truck
+              // sitting at a pit; startHeartbeat() now fills it in. Keep the
+              // two together: raising this without the heartbeat re-creates the
+              // blind spot, and per-leg times depend on the trail being
+              // continuous. Verify heartbeats are really reaching a device with
+              //   select source, count(*) from location_updates
+              //   where user_id = '...' group by 1;
+              // — the app is fully bundled, so a device on an older build will
+              // show no 'heartbeat' rows at all until it is reinstalled.
               distanceFilter: 40
             },
             (location, error) => {
@@ -628,6 +777,8 @@
                 return
               }
               if (!tracking) firstActivate()
+              // The watcher only fires once the truck has moved distanceFilter
+              // metres, so every callback here is by definition movement.
               sendLocation({
                 coords: {
                   latitude: location.latitude,
@@ -636,10 +787,11 @@
                   speed: location.speed,
                   heading: location.bearing
                 }
-              })
+              }, 'move')
             }
           )
           tracking = true
+          startHeartbeat()
           document.getElementById('trackToggle').textContent = 'Pause GPS tracking'
         } catch (e) {
           alert('Could not start location tracking: ' + e.message)
@@ -662,7 +814,15 @@
         pos => {
           lastPosition = pos
           if (!tracking) firstActivate()
-          sendLocation(pos)
+          // watchPosition fires roughly once a second, so writing every
+          // callback floods the table. Throttle to the same 40m the native
+          // watcher uses and let the heartbeat cover standing still — the two
+          // platforms then produce comparable trails to segment.
+          const moved = !lastSentFix || distanceM(
+            lastSentFix.lat, lastSentFix.lng, pos.coords.latitude, pos.coords.longitude
+          ) >= BROWSER_MIN_MOVE_M
+          if (moved) sendLocation(pos, 'move')
+          else noteFix(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, pos.coords.speed, pos.coords.heading)
         },
         err => {
           document.getElementById('statusLabel').textContent = 'GPS error'
@@ -670,12 +830,64 @@
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
       )
 
-      sendInterval = setInterval(() => {
-        if (lastPosition) sendLocation(lastPosition)
-      }, 20000)
-
       tracking = true
+      startHeartbeat()
       document.getElementById('trackToggle').textContent = 'Pause GPS tracking'
+    }
+
+    function distanceM(aLat, aLng, bLat, bLng) {
+      // Fail OPEN if legs.js somehow did not load: Infinity means "treat every
+      // fix as movement", which degrades to the old send-everything behaviour
+      // and to no parked indicator. Returning 0 would have silently stopped
+      // the driver reporting at all, which is far worse.
+      return (window.TruckLegs && TruckLegs.haversine)
+        ? TruckLegs.haversine(aLat, aLng, bLat, bLng)
+        : Number.POSITIVE_INFINITY
+    }
+
+    // Remember where we are without necessarily writing a row.
+    function noteFix(lat, lng, accuracy, speed, heading) {
+      lastFix = { lat: lat, lng: lng, accuracy: accuracy, speed: speed, heading: heading }
+      if (!parkedAnchor || distanceM(parkedAnchor.lat, parkedAnchor.lng, lat, lng) > PARKED_RADIUS_M) {
+        parkedAnchor = { lat: lat, lng: lng }
+        parkedSince = Date.now()
+      }
+    }
+
+    function startHeartbeat() {
+      if (heartbeatTimer) return
+      heartbeatTimer = setInterval(() => {
+        if (!tracking) return
+        // Re-log the last known position rather than forcing a fresh GPS lock.
+        // The truck is not moving; the point is to prove the app is alive and
+        // the truck is still here, which costs a row, not a radio.
+        if (lastFix && Date.now() - lastSentAt >= HEARTBEAT_MS) {
+          sendLocation({ coords: {
+            latitude: lastFix.lat, longitude: lastFix.lng,
+            accuracy: lastFix.accuracy, speed: 0, heading: lastFix.heading
+          } }, 'heartbeat')
+        }
+        renderTrackingStatus()
+      }, HEARTBEAT_TICK_MS)
+    }
+
+    // Tell the driver what the office is seeing. A truck that has been sitting
+    // for 10 minutes is about to generate an alert; showing that on their own
+    // screen first makes the alert land as a nudge rather than an ambush.
+    function renderTrackingStatus() {
+      if (!tracking) return
+      const ring = document.getElementById('statusRing')
+      const label = document.getElementById('statusLabel')
+      const parkedMs = parkedSince ? Date.now() - parkedSince : 0
+      if (parkedSince && parkedMs >= PARKED_NOTICE_MS) {
+        ring.classList.remove('active')
+        ring.classList.add('parked')
+        label.textContent = 'Parked ' + Math.round(parkedMs / 60000) + ' min'
+      } else {
+        ring.classList.remove('parked')
+        ring.classList.add('active')
+        label.textContent = 'Live'
+      }
     }
 
     function firstActivate() {
@@ -689,29 +901,43 @@
         bgWatcherId = null
       }
       if (watchId !== null) navigator.geolocation.clearWatch(watchId)
-      if (sendInterval) clearInterval(sendInterval)
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
       if (wakeLock) { try { wakeLock.release() } catch(e) {} wakeLock = null }
       tracking = false
       watchId = null
-      sendInterval = null
+      heartbeatTimer = null
       lastPosition = null
+      lastFix = null
+      parkedAnchor = null
+      parkedSince = 0
+      document.getElementById('statusRing').classList.remove('parked')
       document.getElementById('statusRing').classList.remove('active')
       document.getElementById('statusLabel').textContent = 'Paused'
       document.getElementById('trackToggle').textContent = 'Resume GPS tracking'
     }
 
-    async function sendLocation(pos) {
+    async function sendLocation(pos, source) {
+      const lat = pos.coords.latitude
+      const lng = pos.coords.longitude
+      noteFix(lat, lng, pos.coords.accuracy, pos.coords.speed, pos.coords.heading)
       const { error } = await sb.from('location_updates').insert({
         user_id: currentUser.id,
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
+        lat: lat,
+        lng: lng,
         accuracy: pos.coords.accuracy,
         speed: pos.coords.speed,
-        heading: pos.coords.heading
+        heading: pos.coords.heading,
+        source: source || 'move'
       })
       if (!error) {
+        // Only advance the heartbeat clock on a row that actually landed. If
+        // the driver is in a dead zone every insert fails, and pretending
+        // otherwise would suppress the retry the next tick would have made.
+        lastSentAt = Date.now()
+        lastSentFix = { lat: lat, lng: lng }
         document.getElementById('infoLastSent').textContent = 'Last ping ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
+      renderTrackingStatus()
     }
 
     async function signOut() {

@@ -6,6 +6,17 @@
 :root {
   --brand-blue: #004AAD;        /* primary brand accent */
   --brand-blue-hover: #003a87;  /* pressed / active state */
+  /* Royal blue is far too dark to read ON the dark shell (#004AAD on #15161a is
+     about 1.9:1). These are the on-dark counterparts: --brand-blue-light for
+     text/links (7.9:1 on the shell), --brand-blue-line for rules and accents
+     that carry no text. Use these instead of the primary on any dark surface. */
+  --brand-blue-light: #7fb3ff;
+  --brand-blue-line: #4d8ef7;
+  /* Stop severity, shared by the driver and dispatcher trip breakdowns so the
+     same duration never gets two different colours across the two screens. */
+  --stop-neutral: #6b7280;
+  --stop-long: #d97706;
+  --stop-very-long: #ef4444;
   --ink: #15161a;               /* dark shell / primary text */
   --charcoal: #2D2727;          /* secondary dark neutral */
   --paper: #ffffff;             /* card / surface white */
