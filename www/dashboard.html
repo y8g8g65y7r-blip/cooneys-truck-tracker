@@ -173,6 +173,82 @@
        the tap had registered. */
     .btn-accept:disabled { background: #14532d; color: #ffffff; cursor: not-allowed; }
 
+    .btn-messages {
+      width: 100%;
+      padding: 12px;
+      border: 1.5px solid #cfe0ff;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      background: #eaf1ff;
+      color: var(--brand-blue);
+    }
+    .btn-messages:active { background: #d9e7ff; }
+    .btn-messages.unread { border-color: #f59e0b; background: #fef3c7; color: #92400e; }
+
+    /* --- Message panel -------------------------------------------------------
+       Scoped to ONE dispatch (Dario's ask was "on dispatches", not a standing
+       DM), so it lives inline in that job's own card rather than as a separate
+       screen. A driver can have several open jobs at once (see
+       activeDispatches above), so this whole panel — list, quick replies,
+       composer — is per-card and keyed by dispatch id, not a page singleton. */
+    .message-panel { display: none; margin-top: 14px; padding-top: 14px; border-top: 1px solid #eef0f2; }
+    .message-panel.open { display: block; }
+    .message-list {
+      max-height: 240px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .message-empty { font-size: 12px; color: #9aa0a6; text-align: center; padding: 8px 0; }
+    .message-bubble { max-width: 82%; padding: 8px 12px; border-radius: 14px; font-size: 13px; overflow-wrap: anywhere; }
+    .message-bubble.mine { align-self: flex-end; background: var(--brand-blue); color: #fff; border-bottom-right-radius: 4px; }
+    .message-bubble.theirs { align-self: flex-start; background: #f4f5f7; color: #15161a; border-bottom-left-radius: 4px; }
+    .message-bubble .meta { font-size: 10px; opacity: 0.7; margin-top: 3px; }
+    .quick-replies { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; }
+    .quick-reply-chip {
+      flex-shrink: 0;
+      background: #eaf1ff;
+      border: 1px solid #cfe0ff;
+      color: var(--brand-blue);
+      border-radius: 14px;
+      padding: 6px 12px;
+      font-size: 11.5px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    .quick-reply-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+    .message-compose { display: flex; gap: 8px; }
+    .message-input {
+      flex: 1;
+      min-width: 0;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 20px;
+      padding: 10px 14px;
+      font-size: 16px; /* 16px stops iOS zooming the page on focus */
+      font-family: inherit;
+      outline: none;
+    }
+    .message-input:focus { border-color: var(--brand-blue); }
+    .btn-send {
+      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: none;
+      background: var(--brand-blue);
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-send:disabled { background: #9aa0a6; cursor: not-allowed; }
+
     /* Only shown when a driver has more than one open job, so the older one
        can never become unreachable. */
     .dispatch-list { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 14px; }
@@ -845,6 +921,18 @@
     // iPhone registered, because the iPhone only rewrites it on app launch.
     let myPushToken = null
 
+    // --- Dispatch messages ---------------------------------------------------
+    // Per-dispatch, not a page singleton: a driver can have several open jobs
+    // at once (see activeDispatches), and each gets its own thread, panel, and
+    // realtime subscription, all keyed by dispatch id.
+    const QUICK_REPLIES = ['On my way', 'Delayed 15 min', 'Arrived on site', 'Need more info']
+    let openMessagePanels = new Set()   // dispatch ids with an expanded panel
+    let unreadMessagePanels = new Set() // dispatch ids with unseen messages while collapsed
+    let messageChannels = {}            // dispatch_id -> realtime channel
+    let messagesById = {}               // dispatch_id -> last-loaded rows (for scroll-preserving re-renders)
+    // Set from a message-push tap so the right job's panel opens automatically.
+    let focusMessagesFor = null
+
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
     sb.auth.getSession().then(async ({ data: { session } }) => {
@@ -873,6 +961,8 @@
 
     window.addEventListener('pagehide', () => {
       if (dispatchChannel) { sb.removeChannel(dispatchChannel); dispatchChannel = null }
+      Object.values(messageChannels).forEach(ch => sb.removeChannel(ch))
+      messageChannels = {}
     })
 
     function setOffline(on, msg) {
@@ -902,14 +992,25 @@
         PushNotifications.addListener('registrationError', (err) => {
           console.error('Push registration error', err)
         })
-        PushNotifications.addListener('pushNotificationReceived', () => loadDispatch())
+        PushNotifications.addListener('pushNotificationReceived', (n) => {
+          const data = n && n.data ? n.data : (n && n.notification && n.notification.data)
+          // A message push for a panel the driver already has open should just
+          // refresh that thread, not the whole dispatch list.
+          if (data && data.type === 'message' && data.dispatch_id && openMessagePanels.has(data.dispatch_id)) {
+            loadMessages(data.dispatch_id)
+            return
+          }
+          loadDispatch()
+        })
         // Open the job the driver actually tapped. The payload carries
         // dispatch_id precisely so this doesn't fall back to "whichever is newest".
         PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-          const id = action && action.notification && action.notification.data
-            ? action.notification.data.dispatch_id
-            : null
-          if (id) focusDispatchId = id
+          const data = action && action.notification && action.notification.data
+          const id = data ? data.dispatch_id : null
+          if (id) {
+            focusDispatchId = id
+            if (data.type === 'message') focusMessagesFor = id
+          }
           loadDispatch()
         })
 
@@ -961,8 +1062,15 @@
 
       if (activeDispatches.length === 0) {
         focusDispatchId = null
+        focusMessagesFor = null
         countEl.style.display = 'none'
         list.innerHTML = '<div class="card"><div class="card-title">Current Dispatch</div><div class="dispatch-empty">No dispatch assigned</div></div>'
+        // No jobs left on screen — any open message panels just vanished with
+        // them, so their realtime channels are now orphaned. Clean up rather
+        // than leaking a subscription per completed job.
+        Object.values(messageChannels).forEach(ch => sb.removeChannel(ch))
+        messageChannels = {}
+        openMessagePanels.clear()
         return
       }
 
@@ -973,6 +1081,8 @@
       list.innerHTML = activeDispatches.map((d, i) => {
         const accepted = !!d.accepted_at
         const id = escapeHtml(d.id)
+        const panelOpen = openMessagePanels.has(d.id)
+        const unread = unreadMessagePanels.has(d.id)
         return `
           <div class="card ${accepted ? 'dispatch-accepted' : ''}" data-dispatch="${id}">
             <div class="card-title">${many ? 'Job ' + (i + 1) : 'Current Dispatch'}</div>
@@ -983,6 +1093,17 @@
               ${accepted ? '' : `<button class="btn-accept" data-action="accept" data-id="${id}">Accept Dispatch</button>`}
               <button class="btn-directions" data-action="directions" data-id="${id}">Get Directions</button>
               <button class="btn-complete" data-action="complete" data-id="${id}">Mark Job Complete</button>
+              <button class="btn-messages${unread ? ' unread' : ''}" data-action="messages" data-id="${id}">${unread ? '🔴 New message' : '💬 Messages'}</button>
+            </div>
+            <div class="message-panel${panelOpen ? ' open' : ''}" data-messages-for="${id}">
+              <div class="message-list" data-message-list="${id}"><div class="message-empty">Loading...</div></div>
+              <div class="quick-replies">
+                ${QUICK_REPLIES.map(q => `<button type="button" class="quick-reply-chip" data-action="quick-reply" data-id="${id}" data-text="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}
+              </div>
+              <div class="message-compose">
+                <input type="text" class="message-input" data-message-input="${id}" placeholder="Message dispatch..." maxlength="1000">
+                <button type="button" class="btn-send" data-action="send" data-id="${id}">➤</button>
+              </div>
             </div>
           </div>
         `
@@ -999,6 +1120,129 @@
       // Cleared on every render path, so a tap can never be applied to an
       // unrelated later render.
       focusDispatchId = null
+
+      // A message push tap should open that job's panel even if this render
+      // was not otherwise triggered by a message.
+      if (focusMessagesFor && activeDispatches.some(x => x.id === focusMessagesFor)) {
+        openMessagePanels.add(focusMessagesFor)
+      }
+      focusMessagesFor = null
+
+      // The list above was just rebuilt from scratch (innerHTML), which wipes
+      // any panel DOM and orphans its realtime channel — reload/resubscribe
+      // every panel that was open, for every dispatch that still exists.
+      openMessagePanels.forEach(id => {
+        if (activeDispatches.some(x => x.id === id)) loadMessages(id)
+        else openMessagePanels.delete(id)
+      })
+    }
+
+    // --- Dispatch messages ----------------------------------------------------
+    async function toggleMessagePanel(id) {
+      const panel = document.querySelector('[data-messages-for="' + CSS.escape(id) + '"]')
+      if (!panel) return
+      if (openMessagePanels.has(id)) {
+        openMessagePanels.delete(id)
+        panel.classList.remove('open')
+        if (messageChannels[id]) { sb.removeChannel(messageChannels[id]); delete messageChannels[id] }
+        return
+      }
+      openMessagePanels.add(id)
+      unreadMessagePanels.delete(id)
+      panel.classList.add('open')
+      const btn = document.querySelector('.card[data-dispatch="' + CSS.escape(id) + '"] .btn-messages')
+      if (btn) { btn.classList.remove('unread'); btn.textContent = '💬 Messages' }
+      await loadMessages(id)
+    }
+
+    async function loadMessages(id) {
+      const listEl = document.querySelector('[data-message-list="' + CSS.escape(id) + '"]')
+      const { data, error } = await sb.from('dispatch_messages')
+        .select('*')
+        .eq('dispatch_id', id)
+        .order('created_at', { ascending: true })
+        .limit(200)
+
+      if (error) {
+        if (listEl) listEl.innerHTML = '<div class="message-empty">Could not load messages — tap Messages again to retry.</div>'
+        return
+      }
+      messagesById[id] = data || []
+      renderMessageList(id)
+      subscribeMessages(id)
+    }
+
+    function renderMessageList(id) {
+      const listEl = document.querySelector('[data-message-list="' + CSS.escape(id) + '"]')
+      if (!listEl) return
+      const rows = messagesById[id] || []
+      if (rows.length === 0) {
+        listEl.innerHTML = '<div class="message-empty">No messages yet</div>'
+        return
+      }
+      listEl.innerHTML = rows.map(m => {
+        const mine = m.sender_id === currentUser.id
+        const timeStr = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        return `
+          <div class="message-bubble ${mine ? 'mine' : 'theirs'}">
+            <div>${escapeHtml(m.body)}</div>
+            <div class="meta">${mine ? 'You' : 'Dispatch'} · ${timeStr}</div>
+          </div>
+        `
+      }).join('')
+      listEl.scrollTop = listEl.scrollHeight
+    }
+
+    function subscribeMessages(id) {
+      if (messageChannels[id]) return // already subscribed
+      messageChannels[id] = sb.channel('messages-' + id)
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'dispatch_messages',
+          filter: 'dispatch_id=eq.' + id
+        }, (payload) => {
+          const row = payload.new
+          if (!messagesById[id]) messagesById[id] = []
+          // Realtime and our own optimistic append can both deliver the same
+          // insert — never show a message twice.
+          if (messagesById[id].some(m => m.id === row.id)) return
+          messagesById[id].push(row)
+          if (openMessagePanels.has(id)) {
+            renderMessageList(id)
+          } else if (row.sender_id !== currentUser.id) {
+            unreadMessagePanels.add(id)
+            const btn = document.querySelector('.card[data-dispatch="' + CSS.escape(id) + '"] .btn-messages')
+            if (btn) { btn.classList.add('unread'); btn.textContent = '🔴 New message' }
+          }
+        })
+        .subscribe()
+    }
+
+    async function sendMessageText(id, text) {
+      const body = (text || '').trim()
+      if (!body) return
+      const input = document.querySelector('[data-message-input="' + CSS.escape(id) + '"]')
+      const sendBtn = document.querySelector('.message-compose [data-action="send"][data-id="' + CSS.escape(id) + '"]')
+      if (sendBtn) sendBtn.disabled = true
+
+      const { data: inserted, error } = await sb.from('dispatch_messages')
+        .insert({ dispatch_id: id, sender_id: currentUser.id, body })
+        .select().single()
+
+      if (sendBtn) sendBtn.disabled = false
+      if (error) {
+        setOffline(true, 'Message not sent — no connection. Try again when you have signal.')
+        return
+      }
+      setOffline(false)
+      if (input) input.value = ''
+      if (!messagesById[id]) messagesById[id] = []
+      if (!messagesById[id].some(m => m.id === inserted.id)) messagesById[id].push(inserted)
+      renderMessageList(id)
+
+      // Push the other side. Non-blocking, same fire-and-forget contract as
+      // send-dispatch-push — the message itself already succeeded above.
+      sb.functions.invoke('send-message-push', { body: { message_id: inserted.id } })
+        .catch(e => console.error('Message push failed (non-fatal)', e))
     }
 
     // Delegated: values go in data-* attributes rather than being interpolated
@@ -1011,6 +1255,19 @@
       if (btn.dataset.action === 'accept') acceptDispatch(id, btn)
       else if (btn.dataset.action === 'directions') getDirections(id)
       else if (btn.dataset.action === 'complete') markComplete(id, btn)
+      else if (btn.dataset.action === 'messages') toggleMessagePanel(id)
+      else if (btn.dataset.action === 'quick-reply') sendMessageText(id, btn.dataset.text)
+      else if (btn.dataset.action === 'send') {
+        const input = document.querySelector('[data-message-input="' + CSS.escape(id) + '"]')
+        sendMessageText(id, input ? input.value : '')
+      }
+    })
+
+    document.getElementById('dispatchList').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !e.target.matches('.message-input')) return
+      e.preventDefault()
+      const id = e.target.dataset.messageInput
+      sendMessageText(id, e.target.value)
     })
 
     async function acceptDispatch(id, btn) {

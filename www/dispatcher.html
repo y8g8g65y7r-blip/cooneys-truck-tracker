@@ -137,15 +137,19 @@
       margin-top: 12px;
     }
 
+    /* Each job is a row (the clickable summary) plus an optional message panel
+       beneath it, wrapped together so the border-between-jobs lives on the
+       wrapper rather than the row — otherwise an open panel would visually
+       attach to the WRONG neighbour. */
+    .dispatch-row { border-bottom: 1px solid #eef0f2; }
+    .dispatch-row:last-child { border-bottom: none; }
     .dispatch-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 12px 0;
-      border-bottom: 1px solid #eef0f2;
       gap: 10px;
     }
-    .dispatch-item:last-child { border-bottom: none; }
     .dispatch-unit {
       background: var(--brand-blue);
       color: #ffffff;
@@ -214,6 +218,79 @@
     .status-pill.accepted { background: #dcfce7; color: #16a34a; }
     .dispatch-item.accepted { border-left: 3px solid #22c55e; padding-left: 9px; }
     .dispatch-item.pending-accept { border-left: 3px solid #eab308; padding-left: 9px; }
+
+    .btn-messages {
+      background: #eaf1ff;
+      border: 1px solid #cfe0ff;
+      color: var(--brand-blue);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .btn-messages:active { background: #d9e7ff; }
+    .btn-messages.unread { border-color: #f59e0b; background: #fef3c7; color: #92400e; }
+
+    /* --- Message panel (see dashboard.html for the driver-side twin) -------- */
+    .message-panel { display: none; padding: 0 0 14px; }
+    .message-panel.open { display: block; }
+    .message-list {
+      max-height: 260px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 10px;
+      background: #f9fafb;
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .message-empty { font-size: 12px; color: #9aa0a6; text-align: center; padding: 8px 0; }
+    .message-bubble { max-width: 82%; padding: 8px 12px; border-radius: 14px; font-size: 13px; overflow-wrap: anywhere; }
+    .message-bubble.mine { align-self: flex-end; background: var(--brand-blue); color: #fff; border-bottom-right-radius: 4px; }
+    .message-bubble.theirs { align-self: flex-start; background: #fff; border: 1px solid #eef0f2; color: #15161a; border-bottom-left-radius: 4px; }
+    .message-bubble .meta { font-size: 10px; opacity: 0.7; margin-top: 3px; }
+    .quick-replies { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; }
+    .quick-reply-chip {
+      flex-shrink: 0;
+      background: #eaf1ff;
+      border: 1px solid #cfe0ff;
+      color: var(--brand-blue);
+      border-radius: 14px;
+      padding: 6px 12px;
+      font-size: 11.5px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    .message-compose { display: flex; gap: 8px; }
+    .message-input {
+      flex: 1;
+      min-width: 0;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 20px;
+      padding: 10px 14px;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+    }
+    .message-input:focus { border-color: var(--brand-blue); }
+    .btn-send {
+      flex-shrink: 0;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: none;
+      background: var(--brand-blue);
+      color: #fff;
+      font-size: 15px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-send:disabled { background: #9aa0a6; cursor: not-allowed; }
 
     .tab-row { display: flex; gap: 8px; margin-bottom: 14px; }
     .tab-btn {
@@ -608,6 +685,8 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
+    const PushNotifications = isNative ? window.Capacitor.Plugins.PushNotifications : null
     let currentUser = null
     let geocodedLat = null
     let geocodedLng = null
@@ -638,6 +717,24 @@
     let historySeq = 0
     let pushSeq = 0
     let activeRendered = false
+    // Unlike dashboard.html this list previously rebuilt unconditionally on
+    // every 20s poll — harmless when rows only held buttons, but a message
+    // composer now holds text a dispatcher may be mid-typing, so a naive
+    // rebuild would steal focus and wipe it. Skip the rebuild when nothing
+    // dispatch-level actually changed, same guard dashboard.html already uses.
+    let lastActiveSig = ''
+
+    // --- Dispatch messages -----------------------------------------------------
+    // One dispatch, one thread (Dario's ask: driver <-> dispatch "on
+    // dispatches", not a standing DM) — see migration 0010. A single
+    // fleet-wide realtime channel is enough here (unlike the driver side,
+    // dispatch/admin already sees every job at once via RLS), and it updates
+    // whichever panel or unread badge the new message belongs to.
+    const QUICK_REPLIES = ['Copy that', 'Confirmed', 'Please call office', 'On it']
+    let openMessagePanels = new Set()
+    let unreadMessagePanels = new Set()
+    let messagesById = {}
+    let messagesChannel = null
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -654,6 +751,7 @@
       try { await loadDrivers() } catch (e) { console.error('Driver roster failed to load', e) }
       loadActiveDispatches()
       setInterval(loadActiveDispatches, 20000)
+      registerPush()
 
       // Realtime: reflect a driver accepting/completing a job instantly
       // instead of waiting up to 20s for the next poll.
@@ -667,11 +765,152 @@
           else historyLoaded = false
         })
         .subscribe()
+
+      messagesChannel = sb.channel('dispatch-messages-all')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dispatch_messages' }, (payload) => {
+          const row = payload.new
+          const id = row.dispatch_id
+          if (!messagesById[id]) messagesById[id] = []
+          if (messagesById[id].some(m => m.id === row.id)) return
+          messagesById[id].push(row)
+          if (openMessagePanels.has(id)) {
+            renderMessageList(id)
+          } else if (row.sender_id !== currentUser.id) {
+            unreadMessagePanels.add(id)
+            const btn = document.querySelector('.dispatch-item[data-open="' + CSS.escape(id) + '"] .btn-messages')
+            if (btn) { btn.classList.add('unread'); btn.textContent = '🔴 New' }
+          }
+        })
+        .subscribe()
     })
 
     window.addEventListener('pagehide', () => {
       if (dispatchChannel) { sb.removeChannel(dispatchChannel); dispatchChannel = null }
+      if (messagesChannel) { sb.removeChannel(messagesChannel); messagesChannel = null }
     })
+
+    async function registerPush() {
+      if (!isNative || !PushNotifications) return
+      const platform = window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : ''
+      if (platform !== 'ios') return // push is iOS-only here, see dashboard.html's registerPush for why
+      try {
+        let perm = await PushNotifications.checkPermissions()
+        if (perm.receive !== 'granted') perm = await PushNotifications.requestPermissions()
+        if (perm.receive !== 'granted') return
+
+        PushNotifications.addListener('registration', async (token) => {
+          await sb.from('profiles').update({ push_token: token.value }).eq('id', currentUser.id)
+        })
+        PushNotifications.addListener('registrationError', (err) => {
+          console.error('Push registration error', err)
+        })
+        PushNotifications.addListener('pushNotificationReceived', (n) => {
+          const data = n && n.data ? n.data : (n && n.notification && n.notification.data)
+          if (data && data.type === 'message' && data.dispatch_id && openMessagePanels.has(data.dispatch_id)) {
+            loadMessages(data.dispatch_id)
+            return
+          }
+          loadActiveDispatches()
+        })
+        PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+          const data = action && action.notification && action.notification.data
+          const id = data ? data.dispatch_id : null
+          loadActiveDispatches()
+          if (id && data.type === 'message') {
+            openMessagePanels.add(id)
+            // The row for this id may not exist in the DOM yet if the list
+            // just started refreshing — give it a beat, same tolerance the
+            // driver-side focusMessagesFor restore relies on via re-render.
+            setTimeout(() => {
+              const panel = document.querySelector('[data-messages-for="' + CSS.escape(id) + '"]')
+              if (panel) { panel.classList.add('open'); loadMessages(id) }
+            }, 400)
+          }
+        })
+
+        await PushNotifications.register()
+      } catch (e) {
+        console.error('Could not set up push notifications', e)
+      }
+    }
+
+    // --- Dispatch messages ------------------------------------------------------
+    async function toggleMessagePanel(id) {
+      const panel = document.querySelector('[data-messages-for="' + CSS.escape(id) + '"]')
+      if (!panel) return
+      const opening = !openMessagePanels.has(id)
+      if (opening) {
+        openMessagePanels.add(id)
+        unreadMessagePanels.delete(id)
+        const btn = document.querySelector('.dispatch-item[data-open="' + CSS.escape(id) + '"] .btn-messages')
+        if (btn) { btn.classList.remove('unread'); btn.textContent = '💬 Messages' }
+        panel.classList.add('open')
+        await loadMessages(id)
+      } else {
+        openMessagePanels.delete(id)
+        panel.classList.remove('open')
+      }
+    }
+
+    async function loadMessages(id) {
+      const listEl = document.querySelector('[data-message-list="' + CSS.escape(id) + '"]')
+      const { data, error } = await sb.from('dispatch_messages')
+        .select('*')
+        .eq('dispatch_id', id)
+        .order('created_at', { ascending: true })
+        .limit(200)
+      if (error) {
+        if (listEl) listEl.innerHTML = '<div class="message-empty">Could not load messages — tap Messages again to retry.</div>'
+        return
+      }
+      messagesById[id] = data || []
+      renderMessageList(id)
+    }
+
+    function renderMessageList(id) {
+      const listEl = document.querySelector('[data-message-list="' + CSS.escape(id) + '"]')
+      if (!listEl) return
+      const rows = messagesById[id] || []
+      if (rows.length === 0) {
+        listEl.innerHTML = '<div class="message-empty">No messages yet</div>'
+        return
+      }
+      listEl.innerHTML = rows.map(m => {
+        const mine = m.sender_id === currentUser.id
+        const driver = driverMap[(jobById[id] || {}).driver_id]
+        const theirLabel = driver ? ('Unit ' + (driver.unit_number || '—')) : 'Driver'
+        const timeStr = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        return `
+          <div class="message-bubble ${mine ? 'mine' : 'theirs'}">
+            <div>${escapeHtml(m.body)}</div>
+            <div class="meta">${mine ? 'You' : escapeHtml(theirLabel)} · ${timeStr}</div>
+          </div>
+        `
+      }).join('')
+      listEl.scrollTop = listEl.scrollHeight
+    }
+
+    async function sendMessageText(id, text) {
+      const body = (text || '').trim()
+      if (!body) return
+      const input = document.querySelector('[data-message-input="' + CSS.escape(id) + '"]')
+      const sendBtn = document.querySelector('.message-compose [data-action="send"][data-id="' + CSS.escape(id) + '"]')
+      if (sendBtn) sendBtn.disabled = true
+
+      const { data: inserted, error } = await sb.from('dispatch_messages')
+        .insert({ dispatch_id: id, sender_id: currentUser.id, body })
+        .select().single()
+
+      if (sendBtn) sendBtn.disabled = false
+      if (error) { alert('Message not sent: ' + error.message); return }
+      if (input) input.value = ''
+      if (!messagesById[id]) messagesById[id] = []
+      if (!messagesById[id].some(m => m.id === inserted.id)) messagesById[id].push(inserted)
+      renderMessageList(id)
+
+      sb.functions.invoke('send-message-push', { body: { message_id: inserted.id } })
+        .catch(e => console.error('Message push failed (non-fatal)', e))
+    }
 
     function switchTab(tab) {
       historyVisible = tab === 'history'
@@ -728,19 +967,37 @@
         const unit = driver?.unit_number || '—'
         const name = driver?.full_name || 'Unknown driver'
         const timeStr = new Date(d.completed_at || d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        const id = escapeHtml(d.id)
+        const panelOpen = openMessagePanels.has(d.id)
         return `
-          <div class="dispatch-item clickable" onclick="openHistoryDetail('${escapeHtml(d.id)}')">
-            <span class="dispatch-unit">U${escapeHtml(unit)}</span>
-            <div class="dispatch-info">
-              <div class="addr">${escapeHtml(d.site_address)}</div>
-              <div class="meta">${escapeHtml(name)} · ${timeStr}${d.completion_photo_path ? '<span class="photo-badge">Photo</span>' : ''}<span data-ticket-for="${escapeHtml(d.id)}"></span></div>
+          <div class="dispatch-row">
+            <div class="dispatch-item clickable" onclick="openHistoryDetail('${id}')">
+              <span class="dispatch-unit">U${escapeHtml(unit)}</span>
+              <div class="dispatch-info">
+                <div class="addr">${escapeHtml(d.site_address)}</div>
+                <div class="meta">${escapeHtml(name)} · ${timeStr}${d.completion_photo_path ? '<span class="photo-badge">Photo</span>' : ''}<span data-ticket-for="${id}"></span></div>
+              </div>
+              <span class="history-status ${escapeHtml(d.status)}">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span>
+              <span class="dispatch-chevron">›</span>
             </div>
-            <span class="history-status ${escapeHtml(d.status)}">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span>
-            <span class="dispatch-chevron">›</span>
+            <div class="dispatch-item" style="padding-top:0;">
+              <button class="btn-messages" data-action="messages" data-id="${id}" onclick="event.stopPropagation()">💬 Messages</button>
+            </div>
+            <div class="message-panel${panelOpen ? ' open' : ''}" data-messages-for="${id}">
+              <div class="message-list" data-message-list="${id}"><div class="message-empty">Loading...</div></div>
+              <div class="quick-replies">
+                ${QUICK_REPLIES.map(q => `<button type="button" class="quick-reply-chip" data-action="quick-reply" data-id="${id}" data-text="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}
+              </div>
+              <div class="message-compose">
+                <input type="text" class="message-input" data-message-input="${id}" placeholder="Message the driver..." maxlength="1000">
+                <button type="button" class="btn-send" data-action="send" data-id="${id}">➤</button>
+              </div>
+            </div>
           </div>
         `
       }).join('')
       markTicketedJobs(data.map(d => d.id))
+      openMessagePanels.forEach(id => { if (data.some(d => d.id === id)) loadMessages(id) })
     }
 
     // One query for the whole page rather than one per row.
@@ -1245,8 +1502,17 @@
       activeRendered = true
       if (!data || data.length === 0) {
         list.innerHTML = '<div class="empty-state">No active dispatches</div>'
+        Object.keys(messagesById).forEach(id => { if (openMessagePanels.has(id)) openMessagePanels.delete(id) })
         return
       }
+
+      // Skip the rebuild when nothing dispatch-level actually changed — a
+      // message composer below may hold text a dispatcher is mid-typing, and
+      // an unconditional rebuild (the old behaviour) would wipe it and steal
+      // focus on every 20s poll. See lastActiveSig's declaration.
+      const sig = JSON.stringify(data.map(d => [d.id, d.accepted_at, d.site_address, d.notes]))
+      if (sig === lastActiveSig) { data.forEach(d => { jobById[d.id] = d }); return }
+      lastActiveSig = sig
 
       data.forEach(d => { jobById[d.id] = d })
       list.innerHTML = data.map(d => {
@@ -1258,19 +1524,43 @@
         const pill = accepted
           ? '<span class="status-pill accepted">Accepted</span>'
           : '<span class="status-pill pending">Pending</span>'
+        const id = escapeHtml(d.id)
+        const panelOpen = openMessagePanels.has(d.id)
+        const unread = unreadMessagePanels.has(d.id)
         return `
-          <div class="dispatch-item clickable ${accepted ? 'accepted' : 'pending-accept'}" data-open="${escapeHtml(d.id)}">
-            <span class="dispatch-unit">U${escapeHtml(unit)}</span>
-            <div class="dispatch-info">
-              <div class="addr">${escapeHtml(d.site_address)}</div>
-              <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
+          <div class="dispatch-row">
+            <div class="dispatch-item clickable ${accepted ? 'accepted' : 'pending-accept'}" data-open="${id}">
+              <span class="dispatch-unit">U${escapeHtml(unit)}</span>
+              <div class="dispatch-info">
+                <div class="addr">${escapeHtml(d.site_address)}</div>
+                <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
+              </div>
+              ${pill}
+              <button class="btn-legs" data-action="legs" data-id="${id}">Trips</button>
+              <button class="btn-messages${unread ? ' unread' : ''}" data-action="messages" data-id="${id}">${unread ? '🔴 New' : '💬 Messages'}</button>
+              <button class="btn-cancel" data-action="cancel" data-id="${id}">Cancel</button>
             </div>
-            ${pill}
-            <button class="btn-legs" data-action="legs" data-id="${escapeHtml(d.id)}">Trips</button>
-            <button class="btn-cancel" data-action="cancel" data-id="${escapeHtml(d.id)}">Cancel</button>
+            <div class="message-panel${panelOpen ? ' open' : ''}" data-messages-for="${id}">
+              <div class="message-list" data-message-list="${id}"><div class="message-empty">Loading...</div></div>
+              <div class="quick-replies">
+                ${QUICK_REPLIES.map(q => `<button type="button" class="quick-reply-chip" data-action="quick-reply" data-id="${id}" data-text="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}
+              </div>
+              <div class="message-compose">
+                <input type="text" class="message-input" data-message-input="${id}" placeholder="Message the driver..." maxlength="1000">
+                <button type="button" class="btn-send" data-action="send" data-id="${id}">➤</button>
+              </div>
+            </div>
           </div>
         `
       }).join('')
+
+      // The list was just rebuilt from scratch, which wipes any panel DOM and
+      // orphans its content — reload every panel that was open, for every
+      // dispatch that still exists.
+      openMessagePanels.forEach(id => {
+        if (data.some(d => d.id === id)) loadMessages(id)
+        else openMessagePanels.delete(id)
+      })
     }
 
     // Delegated: the id travels in a data-* attribute rather than being
@@ -1282,11 +1572,43 @@
       const btn = e.target.closest('button[data-action]')
       if (btn && btn.dataset.action === 'cancel') { cancelDispatch(btn.dataset.id); return }
       if (btn && btn.dataset.action === 'legs') { openJobDetail(btn.dataset.id, 'job'); return }
+      if (btn && btn.dataset.action === 'messages') { toggleMessagePanel(btn.dataset.id); return }
+      if (btn && btn.dataset.action === 'quick-reply') { sendMessageText(btn.dataset.id, btn.dataset.text); return }
+      if (btn && btn.dataset.action === 'send') {
+        const id = btn.dataset.id
+        const input = document.querySelector('[data-message-input="' + CSS.escape(id) + '"]')
+        sendMessageText(id, input ? input.value : '')
+        return
+      }
       // An ACTIVE job is the important case for the leg breakdown: a shuttle
       // driver runs it all day and often never marks it complete, so waiting
       // for it to reach History would mean never seeing the legs at all.
       const row = e.target.closest('.dispatch-item[data-open]')
       if (row) openJobDetail(row.dataset.open, 'job')
+    })
+
+    document.getElementById('activeList').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !e.target.matches('.message-input')) return
+      e.preventDefault()
+      sendMessageText(e.target.dataset.messageInput, e.target.value)
+    })
+
+    document.getElementById('historyItems').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]')
+      if (!btn) return
+      if (btn.dataset.action === 'messages') toggleMessagePanel(btn.dataset.id)
+      else if (btn.dataset.action === 'quick-reply') sendMessageText(btn.dataset.id, btn.dataset.text)
+      else if (btn.dataset.action === 'send') {
+        const id = btn.dataset.id
+        const input = document.querySelector('[data-message-input="' + CSS.escape(id) + '"]')
+        sendMessageText(id, input ? input.value : '')
+      }
+    })
+
+    document.getElementById('historyItems').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !e.target.matches('.message-input')) return
+      e.preventDefault()
+      sendMessageText(e.target.dataset.messageInput, e.target.value)
     })
 
     async function cancelDispatch(id) {
