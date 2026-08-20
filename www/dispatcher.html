@@ -426,6 +426,87 @@
     .lightbox.open { display: flex; }
     .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
+    /* --- Submitted haul ticket ---------------------------------------------
+       Laid out to read like the paper ticket it replaces rather than as a list
+       of form values: same letterhead, same boxed field grid. Styled HTML, not
+       a rasterised image — it looks like the ticket, stays selectable and
+       searchable, and needs no canvas work. */
+    .ticket {
+      border: 1.5px solid #15161a;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 16px;
+      font-size: 12px;
+      color: #15161a;
+      background: #fff;
+    }
+    .ticket-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1.5px solid #15161a;
+    }
+    .ticket-head .co { font-size: 14px; font-weight: 800; letter-spacing: 0.2px; }
+    .ticket-head .meta { font-size: 10px; color: #6c757d; line-height: 1.5; margin-top: 3px; }
+    .ticket-head .no { text-align: right; flex-shrink: 0; }
+    .ticket-head .no .k {
+      font-size: 8.5px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      color: #6c757d;
+      text-transform: uppercase;
+      display: block;
+    }
+    .ticket-head .no .v { font-size: 17px; font-weight: 800; color: #b91c1c; font-variant-numeric: tabular-nums; }
+    .ticket-grid { display: flex; flex-wrap: wrap; }
+    .tc {
+      border-right: 1px solid #d7dbdf;
+      border-bottom: 1px solid #d7dbdf;
+      padding: 8px 10px;
+      min-width: 0;
+      flex: 1 1 50%;
+    }
+    .tc.full { flex-basis: 100%; border-right: none; }
+    .tc.third { flex-basis: 25%; }
+    .tc:last-child { border-right: none; }
+    .tc .k {
+      display: block;
+      font-size: 8.5px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      color: #9aa0a6;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    .tc .v { font-size: 12.5px; font-weight: 700; overflow-wrap: anywhere; }
+    .tc .v.empty { color: #c3c8ce; font-weight: 500; }
+    .ticket-amount {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 11px 14px;
+      background: #15161a;
+      color: #fff;
+    }
+    .ticket-amount .k { font-size: 9px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: rgba(255,255,255,0.55); }
+    .ticket-amount .v { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .ticket-foot { padding: 8px 14px; font-size: 9.5px; color: #9aa0a6; }
+
+    .ticket-badge {
+      display: inline-block;
+      background: #dcfce7;
+      color: #166534;
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 5px;
+      margin-left: 6px;
+    }
+
     .idle-banner {
       display: none;
       margin-top: 12px;
@@ -506,6 +587,7 @@
       <div class="modal-driver" id="modalDriver"></div>
       <div class="modal-notes" id="modalNotes" style="display:none;"></div>
       <img class="modal-photo" id="modalPhoto" alt="Photo the driver attached when completing this job">
+      <div id="modalTicket"></div>
       <div class="modal-timeline" id="modalTimeline"></div>
       <div class="scope-row" id="modalScope">
         <button class="scope-btn active" data-scope="job">This job</button>
@@ -651,13 +733,25 @@
             <span class="dispatch-unit">U${escapeHtml(unit)}</span>
             <div class="dispatch-info">
               <div class="addr">${escapeHtml(d.site_address)}</div>
-              <div class="meta">${escapeHtml(name)} · ${timeStr}${d.completion_photo_path ? '<span class="photo-badge">Photo</span>' : ''}</div>
+              <div class="meta">${escapeHtml(name)} · ${timeStr}${d.completion_photo_path ? '<span class="photo-badge">Photo</span>' : ''}<span data-ticket-for="${escapeHtml(d.id)}"></span></div>
             </div>
             <span class="history-status ${escapeHtml(d.status)}">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span>
             <span class="dispatch-chevron">›</span>
           </div>
         `
       }).join('')
+      markTicketedJobs(data.map(d => d.id))
+    }
+
+    // One query for the whole page rather than one per row.
+    async function markTicketedJobs(ids) {
+      if (!ids.length) return
+      const { data, error } = await sb.from('haul_tickets').select('dispatch_id').in('dispatch_id', ids)
+      if (error || !data) return
+      const seen = new Set(data.map(t => t.dispatch_id))
+      document.querySelectorAll('[data-ticket-for]').forEach(el => {
+        if (seen.has(el.dataset.ticketFor)) el.innerHTML = '<span class="ticket-badge">Ticket</span>'
+      })
     }
 
     function fmtTime(iso) {
@@ -702,6 +796,7 @@
       else { notesEl.style.display = 'none' }
 
       showCompletionPhoto(d.completion_photo_path, seq)
+      showHaulTicket(d.id, seq)
 
       const stillOpen = d.status === 'active'
       const duration = fmtDuration(d.accepted_at, d.completed_at || (stillOpen ? new Date().toISOString() : null))
@@ -798,6 +893,70 @@
       document.getElementById('lightbox').classList.remove('open')
       document.getElementById('lightboxImg').removeAttribute('src')
     })
+
+    // --- Submitted haul ticket -----------------------------------------------
+    // RLS does the access control: the "Staff view submitted tickets" policy
+    // only returns status='submitted', so an unsubmitted ticket cannot reach
+    // this screen even if the query asked for one.
+    async function showHaulTicket(dispatchId, seq) {
+      const el = document.getElementById('modalTicket')
+      el.innerHTML = ''
+      const { data, error } = await sb.from('haul_tickets')
+        .select('*')
+        .eq('dispatch_id', dispatchId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+      if (error || seq !== detailSeq) return
+      const t = data && data[0]
+      if (!t) return
+      el.innerHTML = renderTicket(t)
+    }
+
+    function cell(label, value, cls) {
+      const has = value != null && String(value).trim() !== ''
+      return `<div class="tc ${cls || ''}"><span class="k">${escapeHtml(label)}</span>`
+        + `<span class="v${has ? '' : ' empty'}">${has ? escapeHtml(value) : '—'}</span></div>`
+    }
+
+    function renderTicket(t) {
+      const meta = [COMPANY.address, COMPANY.phone, COMPANY.email].filter(Boolean).map(escapeHtml).join('<br>')
+      const amount = t.total != null ? '$' + Number(t.total).toFixed(2) : '—'
+      const dateStr = t.ticket_date || ''
+      const hours = t.total_hours != null ? Number(t.total_hours).toFixed(2) : null
+      return `
+        <div class="ticket">
+          <div class="ticket-head">
+            <div>
+              <div class="co">${escapeHtml(COMPANY.name)}</div>
+              <div class="meta">${meta}</div>
+            </div>
+            <div class="no">
+              <span class="k">Haul Ticket No.</span>
+              <span class="v">E${escapeHtml(t.ticket_no)}</span>
+            </div>
+          </div>
+          <div class="ticket-grid">
+            ${cell('Date', dateStr)}
+            ${cell('W.C.B. #', COMPANY.wcbNumber)}
+            ${cell('Customer', t.customer)}
+            ${cell('Job #', t.job_number)}
+            ${cell('Address', t.site_address, 'full')}
+            ${cell('Driver', t.driver_name)}
+            ${cell('Truck #', t.truck_number)}
+            ${cell('Equipment', t.equipment, 'full')}
+            ${cell('Description of Work', t.description_of_work, 'full')}
+            ${cell('Start Time', t.start_time ? String(t.start_time).slice(0, 5) : null, 'third')}
+            ${cell('Finish Time', t.finish_time ? String(t.finish_time).slice(0, 5) : null, 'third')}
+            ${cell('Total Hours', hours, 'third')}
+            ${cell('Loads', t.loads_count, 'third')}
+            ${cell('Material Notes', t.material_notes, 'full')}
+            ${cell('Customer Approval', t.customer_approval_name)}
+            ${cell('Approved', t.submitted_at ? new Date(t.submitted_at).toLocaleDateString() : null)}
+          </div>
+          <div class="ticket-amount"><span class="k">Amount</span><span class="v">${escapeHtml(amount)}</span></div>
+          ${COMPANY.gstNumber ? `<div class="ticket-foot">GST # ${escapeHtml(COMPANY.gstNumber)}</div>` : ''}
+        </div>`
+    }
 
     // Is this truck sitting RIGHT NOW? Written by the check-idle-drivers cron,
     // not computed here — the whole point of that job is that it runs when

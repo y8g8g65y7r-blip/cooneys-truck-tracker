@@ -433,6 +433,162 @@
       background: rgba(255,255,255,0.08);
     }
 
+    /* --- Haul ticket --------------------------------------------------------
+       Replaces the paper book. Deliberately a plain, dense form: this gets
+       filled in at the end of a shift, and every extra flourish is another
+       thing between the driver and being done. */
+    .ticket-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: #f4f5f7;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #15161a;
+    }
+    .ticket-status.done { background: #f0fdf4; color: #166534; }
+    .btn-ticket {
+      width: 100%;
+      padding: 16px;
+      border: 1.5px dashed #c3c8ce;
+      border-radius: 12px;
+      background: #fafbfc;
+      color: #15161a;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-ticket:active { background: #eef1f4; }
+    .btn-ticket-edit {
+      background: none;
+      border: none;
+      color: var(--brand-blue);
+      font-size: 12.5px;
+      font-weight: 800;
+      cursor: pointer;
+      font-family: inherit;
+      flex-shrink: 0;
+    }
+
+    .form-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #f4f5f7;
+      z-index: 3500;
+      flex-direction: column;
+    }
+    .form-overlay.open { display: flex; }
+    .form-head {
+      background: #15161a;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .form-head .t { color: #fff; font-size: 15px; font-weight: 800; }
+    .form-head button {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .form-body { flex: 1; overflow-y: auto; padding: 16px 16px 28px; }
+    .form-letterhead {
+      background: #fff;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+      font-size: 11.5px;
+      color: #6c757d;
+      line-height: 1.5;
+    }
+    .form-letterhead b { color: #15161a; font-size: 13px; display: block; margin-bottom: 2px; }
+    .form-section {
+      background: #fff;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .form-section h3 {
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 12px;
+    }
+    .fg { margin-bottom: 12px; }
+    .fg:last-child { margin-bottom: 0; }
+    .fg label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: #6c757d;
+      margin-bottom: 5px;
+    }
+    .fg input, .fg select, .fg textarea {
+      width: 100%;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 9px;
+      padding: 12px 12px;
+      font-size: 16px; /* 16px stops iOS zooming the page on focus */
+      color: #15161a;
+      background: #fff;
+      font-family: inherit;
+      outline: none;
+    }
+    .fg input:focus, .fg select:focus, .fg textarea:focus { border-color: var(--brand-blue); }
+    .fg textarea { min-height: 64px; resize: vertical; }
+    .fg-row { display: flex; gap: 10px; }
+    .fg-row .fg { flex: 1; }
+    .fg-readonly input { background: #f4f5f7; color: #6c757d; }
+    .form-total {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      background: #15161a;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .form-total .k { color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; }
+    .form-total .v { color: #fff; font-size: 22px; font-weight: 800; }
+    .btn-form-save {
+      width: 100%;
+      padding: 17px;
+      border: none;
+      border-radius: 12px;
+      background: #15803d;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-form-save:active { background: #22c55e; }
+
+    /* Ticket as shown back in the driver's job history. */
+    .ticket-card {
+      background: rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.75);
+    }
+    .ticket-card .no { font-weight: 800; color: #fff; }
+
     .lightbox {
       display: none;
       position: fixed;
@@ -499,6 +655,11 @@
       <div class="sheet-title">Mark job complete?</div>
       <div class="sheet-addr" id="sheetAddr"></div>
 
+      <div class="sheet-label">Haul ticket</div>
+      <div id="ticketSlot">
+        <button class="btn-ticket" type="button" id="btnFillTicket">Fill Out Haul Ticket</button>
+      </div>
+
       <div class="sheet-label">Photo — optional</div>
       <div class="sheet-hint">Load, site, or ticket. Skip it if the job doesn't need one.</div>
       <div class="photo-actions" id="photoActions">
@@ -524,6 +685,109 @@
   <input type="file" accept="image/*" capture="environment" id="fileCamera" style="display:none;">
   <input type="file" accept="image/*" id="filePicker" style="display:none;">
 
+  <div class="form-overlay" id="ticketForm">
+    <div class="form-head">
+      <span class="t">Haul Ticket</span>
+      <button type="button" id="btnTicketClose">Cancel</button>
+    </div>
+    <div class="form-body">
+      <div class="form-letterhead" id="ticketLetterhead"></div>
+
+      <div class="form-section">
+        <h3>Job</h3>
+        <div class="fg">
+          <label for="tkDate">Date</label>
+          <input type="date" id="tkDate">
+        </div>
+        <div class="fg">
+          <label for="tkCustomer">Customer</label>
+          <input type="text" id="tkCustomer" autocomplete="off">
+        </div>
+        <div class="fg">
+          <label for="tkJobNo">Job #</label>
+          <input type="text" id="tkJobNo" autocomplete="off">
+        </div>
+        <div class="fg">
+          <label for="tkAddress">Address</label>
+          <input type="text" id="tkAddress" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Driver &amp; Equipment</h3>
+        <div class="fg-row">
+          <div class="fg fg-readonly">
+            <label for="tkDriver">Driver</label>
+            <input type="text" id="tkDriver" readonly>
+          </div>
+          <div class="fg">
+            <label for="tkTruck">Truck #</label>
+            <input type="text" id="tkTruck" autocomplete="off">
+          </div>
+        </div>
+        <div class="fg">
+          <label for="tkEquipment">Equipment</label>
+          <select id="tkEquipment"></select>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Work</h3>
+        <div class="fg">
+          <label for="tkDescription">Description of Work</label>
+          <textarea id="tkDescription" placeholder="e.g. Hourly haul - gravel from Burnco to site"></textarea>
+        </div>
+        <div class="fg">
+          <label for="tkAmount">Amount ($)</label>
+          <input type="text" inputmode="decimal" id="tkAmount" placeholder="0.00">
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Time</h3>
+        <div class="fg-row">
+          <div class="fg">
+            <label for="tkStart">Start Time</label>
+            <input type="time" id="tkStart">
+          </div>
+          <div class="fg">
+            <label for="tkFinish">Finish Time</label>
+            <input type="time" id="tkFinish">
+          </div>
+        </div>
+        <div class="fg-row">
+          <div class="fg">
+            <label for="tkHours">Total Hours</label>
+            <input type="text" inputmode="decimal" id="tkHours" placeholder="0.00">
+          </div>
+          <div class="fg">
+            <label for="tkLoads">Loads</label>
+            <input type="text" inputmode="numeric" id="tkLoads" placeholder="0">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Notes &amp; Approval</h3>
+        <div class="fg">
+          <label for="tkMaterial">Material Notes</label>
+          <textarea id="tkMaterial" placeholder="Material, pit, anything the office needs"></textarea>
+        </div>
+        <div class="fg">
+          <label for="tkApproval">Customer Approval (name)</label>
+          <input type="text" id="tkApproval" autocomplete="off" placeholder="Name of who signed off on site">
+        </div>
+      </div>
+
+      <div class="form-total">
+        <span class="k">Amount</span>
+        <span class="v" id="tkTotalView">$0.00</span>
+      </div>
+
+      <button class="btn-form-save" type="button" id="btnTicketSave">Save Ticket</button>
+    </div>
+  </div>
+
   <div class="lightbox" id="lightbox"><img id="lightboxImg" alt="Job photo, full size"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -537,6 +801,7 @@
     let currentUser = null
     let historyLoaded = false
     let historyById = {}
+    let myProfile = {}
     let tracking = false
     let watchId = null
     let bgWatcherId = null
@@ -587,6 +852,8 @@
       currentUser = session.user
       const { data: profile } = await sb.from('profiles').select('full_name, unit_number, role').eq('id', session.user.id).single()
       if (profile?.role === 'admin' || profile?.role === 'dispatcher') { window.location.href = 'dispatcher.html'; return }
+      myProfile = profile || {}
+      initTicketForm()
       document.getElementById('infoName').textContent = profile?.full_name || 'Unknown'
       document.getElementById('unitBadge').textContent = 'UNIT ' + (profile?.unit_number || '—')
       loadDispatch()
@@ -909,6 +1176,8 @@
       const d = activeDispatches.find(x => x.id === id)
       pendingComplete = { id: id, btn: btn }
       pendingPhotoDataUrl = null
+      pendingTicket = null
+      renderTicketSlot()
       document.getElementById('sheetAddr').textContent = d ? d.site_address : ''
       setPhotoPreview(null)
       sheetError('')
@@ -922,6 +1191,7 @@
       document.getElementById('completeSheet').classList.remove('open')
       pendingComplete = null
       pendingPhotoDataUrl = null
+      pendingTicket = null
       setPhotoPreview(null)
     }
 
@@ -1089,6 +1359,27 @@
         }
       }
 
+      // Ticket goes in BEFORE the job is closed, so a submitted ticket can
+      // never end up attached to a job that failed to complete.
+      if (pendingTicket) {
+        confirmBtn.textContent = 'Submitting ticket...'
+        const { error: tErr } = await sb.from('haul_tickets').insert(
+          Object.assign({}, pendingTicket, { driver_id: currentUser.id, dispatch_id: id })
+        )
+        if (tErr) {
+          console.error('Ticket submit failed', tErr)
+          // Same rule as the photo: never strand a driver on a job they cannot
+          // close because they have no signal. The ticket is kept in memory so
+          // a retry re-sends it; tapping again completes without one.
+          confirmBtn.disabled = false
+          confirmBtn.textContent = 'Complete without ticket'
+          sheetError('The ticket would not submit — probably no signal. Tap again to complete this job without it.')
+          pendingTicket = null
+          renderTicketSlot()
+          return
+        }
+      }
+
       confirmBtn.textContent = 'Marking complete...'
       const patch = { status: 'completed', completed_at: new Date().toISOString() }
       if (photoPath) patch.completion_photo_path = photoPath
@@ -1109,6 +1400,129 @@
       activeDispatches = activeDispatches.filter(x => x.id !== id)
       renderDispatches()
       loadDispatch()
+    }
+
+    // --- Haul ticket ---------------------------------------------------------
+    // v1 scope: electronic form only. The "photo of the paper ticket" path,
+    // pre-fill from the driver's last ticket, and the per-load
+    // Loaded/Dumped/Cycle/Scale table are all deliberately not here yet — the
+    // 0009 schema already carries columns for them.
+    let pendingTicket = null
+
+    function initTicketForm() {
+      const lh = document.getElementById('ticketLetterhead')
+      const bits = [COMPANY.address, COMPANY.phone, COMPANY.email]
+      if (COMPANY.wcbNumber) bits.push('W.C.B. # ' + COMPANY.wcbNumber)
+      if (COMPANY.gstNumber) bits.push('GST # ' + COMPANY.gstNumber)
+      lh.innerHTML = `<b>${escapeHtml(COMPANY.name)}</b>${bits.map(escapeHtml).join(' · ')}`
+      document.getElementById('tkEquipment').innerHTML =
+        '<option value=""></option>' +
+        EQUIPMENT_TYPES.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')
+    }
+
+    function openTicketForm() {
+      const d = pendingComplete ? activeDispatches.find(x => x.id === pendingComplete.id) : null
+      const t = pendingTicket || {}
+      const now = new Date()
+      const pad = n => String(n).padStart(2, '0')
+
+      document.getElementById('tkDate').value = t.ticket_date || `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+      document.getElementById('tkCustomer').value = t.customer || ''
+      document.getElementById('tkJobNo').value = t.job_number || ''
+      document.getElementById('tkAddress').value = t.site_address || (d ? d.site_address : '')
+      document.getElementById('tkDriver').value = t.driver_name || myProfile.full_name || ''
+      document.getElementById('tkTruck').value = t.truck_number || myProfile.unit_number || ''
+      document.getElementById('tkEquipment').value = t.equipment || ''
+      document.getElementById('tkDescription').value = t.description_of_work || ''
+      document.getElementById('tkAmount').value = t.total != null ? t.total : ''
+      document.getElementById('tkStart').value = t.start_time || ''
+      document.getElementById('tkFinish').value = t.finish_time || ''
+      document.getElementById('tkHours').value = t.total_hours != null ? t.total_hours : ''
+      document.getElementById('tkLoads').value = t.loads_count != null ? t.loads_count : ''
+      document.getElementById('tkMaterial').value = t.material_notes || ''
+      document.getElementById('tkApproval').value = t.customer_approval_name || ''
+      refreshTicketTotal()
+      document.getElementById('ticketForm').classList.add('open')
+    }
+
+    function refreshTicketTotal() {
+      const n = parseFloat(document.getElementById('tkAmount').value)
+      document.getElementById('tkTotalView').textContent =
+        isFinite(n) ? '$' + n.toFixed(2) : '$0.00'
+    }
+
+    // Hours follow from start/finish unless the driver has typed their own —
+    // billed hours and clock hours legitimately differ (minimum charges), so
+    // this only ever fills a blank, it never overwrites.
+    function autoHours() {
+      const s = document.getElementById('tkStart').value
+      const f = document.getElementById('tkFinish').value
+      const box = document.getElementById('tkHours')
+      if (!s || !f || box.dataset.touched === '1') return
+      const [sh, sm] = s.split(':').map(Number)
+      const [fh, fm] = f.split(':').map(Number)
+      let mins = (fh * 60 + fm) - (sh * 60 + sm)
+      if (mins < 0) mins += 24 * 60 // finished after midnight
+      box.value = (mins / 60).toFixed(2)
+    }
+
+    document.getElementById('btnFillTicket').addEventListener('click', openTicketForm)
+    document.getElementById('btnTicketClose').addEventListener('click', () => {
+      document.getElementById('ticketForm').classList.remove('open')
+    })
+    document.getElementById('tkAmount').addEventListener('input', refreshTicketTotal)
+    document.getElementById('tkStart').addEventListener('change', autoHours)
+    document.getElementById('tkFinish').addEventListener('change', autoHours)
+    document.getElementById('tkHours').addEventListener('input', function () { this.dataset.touched = '1' })
+
+    document.getElementById('btnTicketSave').addEventListener('click', () => {
+      const num = (id) => {
+        const v = parseFloat(document.getElementById(id).value)
+        return isFinite(v) ? v : null
+      }
+      const str = (id) => {
+        const v = document.getElementById(id).value.trim()
+        return v === '' ? null : v
+      }
+      const loads = parseInt(document.getElementById('tkLoads').value, 10)
+      pendingTicket = {
+        method: 'electronic',
+        ticket_date: str('tkDate'),
+        customer: str('tkCustomer'),
+        job_number: str('tkJobNo'),
+        site_address: str('tkAddress'),
+        driver_name: str('tkDriver'),
+        truck_number: str('tkTruck'),
+        equipment: str('tkEquipment'),
+        description_of_work: str('tkDescription'),
+        total: num('tkAmount'),
+        start_time: str('tkStart'),
+        finish_time: str('tkFinish'),
+        total_hours: num('tkHours'),
+        loads_count: isFinite(loads) ? loads : null,
+        material_notes: str('tkMaterial'),
+        customer_approval_name: str('tkApproval')
+      }
+      document.getElementById('ticketForm').classList.remove('open')
+      renderTicketSlot()
+    })
+
+    function renderTicketSlot() {
+      const slot = document.getElementById('ticketSlot')
+      if (!pendingTicket) {
+        slot.innerHTML = '<button class="btn-ticket" type="button" id="btnFillTicket">Fill Out Haul Ticket</button>'
+        slot.querySelector('#btnFillTicket').addEventListener('click', openTicketForm)
+        return
+      }
+      const bits = []
+      if (pendingTicket.customer) bits.push(pendingTicket.customer)
+      if (pendingTicket.total != null) bits.push('$' + pendingTicket.total.toFixed(2))
+      if (pendingTicket.total_hours != null) bits.push(pendingTicket.total_hours + ' h')
+      slot.innerHTML = `<div class="ticket-status done">
+          <span>Ticket ready${bits.length ? ' — ' + escapeHtml(bits.join(' · ')) : ''}</span>
+          <button class="btn-ticket-edit" type="button" id="btnEditTicket">Edit</button>
+        </div>`
+      slot.querySelector('#btnEditTicket').addEventListener('click', openTicketForm)
     }
 
     // --- Viewing a photo -----------------------------------------------------
