@@ -135,6 +135,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <script src="legs.js"></script>
+  <script src="stops.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -142,6 +143,7 @@
     let markers = {}
     let trailLines = {}
     let dispatchMarkers = {}
+    let pickupMarkers = {}   // dispatch id -> pickup pin (two-stop jobs, 0011)
     let routeLines = {}
     // fitBounds must not fight an operator who has panned or zoomed. Auto-fit
     // only on the first render and whenever the set of things on the map changes.
@@ -235,7 +237,10 @@
         const truckMoved = metres(c.from.lat, c.from.lng, from.lat, from.lng) >= ROUTE_MOVE_THRESHOLD_M
         if (!destMoved && !truckMoved) return
       }
-      if (routeQueue.some(q => q.id === id)) return
+      // Already queued: refresh its endpoints in place (the stop may have just
+      // changed from pickup to drop-off) rather than queueing a duplicate.
+      const queued = routeQueue.find(q => q.id === id)
+      if (queued) { queued.from = from; queued.to = to; return }
       routeQueue.push({ id: id, from: from, to: to })
       pumpRouteQueue()
     }
@@ -480,64 +485,122 @@
       // headed. Amber while pending, green once the driver taps Accept. A
       // dashed line ties the pin back to that driver's current truck position.
       const activeDispatchIds = new Set()
+      const pickupIds = new Set()
       ;(dispatchData || []).forEach(d => {
-        if (d.lat == null || d.lng == null) return
-        activeDispatchIds.add(d.id)
         const driver = profileMap[d.driver_id]
         const unit = driver?.unit_number || '?'
         const name = driver?.full_name || 'Unknown'
         const accepted = !!d.accepted_at
         const color = accepted ? '#22c55e' : '#eab308'
-        const lat = parseFloat(d.lat)
-        const lng = parseFloat(d.lng)
+        const twoStop = DispatchStops.hasPickup(d)
+        const stage = DispatchStops.stage(d)
+        const next = DispatchStops.nextStop(d)
+        const pickup = DispatchStops.stopOf(d, 'pickup')
+        const hasDrop = d.lat != null && d.lng != null
+        const hasPickupPin = !!(pickup && pickup.lat != null)
+        if (!hasDrop && !hasPickupPin) return
+        activeDispatchIds.add(d.id)
 
-        const icon = L.divIcon({
-          className: '',
-          html: `<div style="background:${color};color:#ffffff;border:3px solid #ffffff;border-radius:50% 50% 50% 0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:14px;transform:rotate(45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4);"><span style="transform:rotate(-45deg)">🚩</span></div>`,
-          iconSize: [32, 32],
-          iconAnchor: [16, 32]
-        })
         const cached = routeCache[d.id]
         // Road distance and drive time, straight off the route we already
-        // fetched — the single most useful thing on this popup for a
-        // dispatcher deciding who to send next.
+        // fetched, and only when that route is to the stop the truck is
+        // heading for NOW (the pickup, then the drop-off).
         const etaStr = (cached && cached.latlngs && cached.distanceM != null)
-          ? `<br><b>${(cached.distanceM / 1000).toFixed(1)} km · ${fmtEta(cached.durationS)}</b> by road`
+          ? `<br><b>${(cached.distanceM / 1000).toFixed(1)} km · ${fmtEta(cached.durationS)}</b> by road to the ${next && next.kind === 'pickup' ? 'pickup' : 'drop-off'}`
           : ''
-        const popup = `<b>${accepted ? '✓ Accepted' : 'Pending'}</b> — Unit ${escapeHtml(unit)} (${escapeHtml(name)})<br>${escapeHtml(d.site_address)}${d.notes ? '<br>' + escapeHtml(d.notes) : ''}${etaStr}`
+        const loadedStr = d.picked_up_at
+          ? `Loaded ${new Date(d.picked_up_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${d.pickup_source === 'geofence' ? ' (auto)' : ''}`
+          : ''
+        const stageStr = twoStop ? ` · ${escapeHtml(d.picked_up_at ? loadedStr + ', to drop-off' : stage.label)}` : ''
 
-        if (dispatchMarkers[d.id]) {
-          dispatchMarkers[d.id].setIcon(icon)
-          dispatchMarkers[d.id].setPopupContent(popup)
-        } else {
-          dispatchMarkers[d.id] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup)
+        // Drop-off pin: the original flag, unchanged for a single-stop job.
+        if (hasDrop) {
+          const lat = parseFloat(d.lat)
+          const lng = parseFloat(d.lng)
+          const icon = L.divIcon({
+            className: '',
+            html: `<div style="background:${color};color:#ffffff;border:3px solid #ffffff;border-radius:50% 50% 50% 0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:14px;transform:rotate(45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4);"><span style="transform:rotate(-45deg)">🚩</span></div>`,
+            iconSize: [32, 32],
+            iconAnchor: [16, 32]
+          })
+          const popup = `<b>${accepted ? '✓ Accepted' : 'Pending'}</b>${stageStr} — Unit ${escapeHtml(unit)} (${escapeHtml(name)})<br>`
+            + (twoStop ? '<b>Drop-off:</b> ' : '') + `${escapeHtml(d.site_address)}${d.notes ? '<br>' + escapeHtml(d.notes) : ''}`
+            + (next && next.kind === 'dropoff' ? etaStr : '')
+          if (dispatchMarkers[d.id]) {
+            dispatchMarkers[d.id].setIcon(icon)
+            dispatchMarkers[d.id].setPopupContent(popup)
+          } else {
+            dispatchMarkers[d.id] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup)
+          }
+          bounds.push([lat, lng])
+        } else if (dispatchMarkers[d.id]) {
+          map.removeLayer(dispatchMarkers[d.id]); delete dispatchMarkers[d.id]
         }
-        bounds.push([lat, lng])
 
+        // Pickup pin: a square badge, not a teardrop, so it never reads as a
+        // second job. Brand blue while the truck is heading there, grey with a
+        // tick once loaded (kept on the map: a shuttle goes back to it).
+        if (hasPickupPin) {
+          pickupIds.add(d.id)
+          const done = !!d.picked_up_at
+          const bg = done ? '#6b7280' : BRAND_BLUE
+          const icon = L.divIcon({
+            className: '',
+            html: `<div style="background:${bg};color:#ffffff;border:3px solid #ffffff;border-radius:8px;min-width:30px;height:30px;padding:0 5px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,0.4);${done ? 'opacity:0.75' : ''}">${done ? '✓' : 'P'}</div>`,
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+          })
+          const popup = `<b>Pickup${done ? ' — ' + escapeHtml(loadedStr) : ''}</b> — Unit ${escapeHtml(unit)} (${escapeHtml(name)})<br>`
+            + `${escapeHtml(DispatchStops.pickupLabel(d))}${d.pickup_name ? '<br>' + escapeHtml(d.pickup_address) : ''}`
+            + `<br>Then to: ${escapeHtml(d.site_address)}`
+            + (next && next.kind === 'pickup' ? etaStr : '')
+          if (pickupMarkers[d.id]) {
+            pickupMarkers[d.id].setIcon(icon)
+            pickupMarkers[d.id].setPopupContent(popup)
+          } else {
+            pickupMarkers[d.id] = L.marker([pickup.lat, pickup.lng], { icon }).addTo(map).bindPopup(popup)
+          }
+          bounds.push([pickup.lat, pickup.lng])
+        }
+
+        // The line goes to whichever stop is NEXT. If that stop has no pin
+        // (dispatcher skipped Find), draw no line at all rather than a
+        // confident line to the wrong stop.
+        const target = (next && next.lat != null) ? { lat: next.lat, lng: next.lng } : null
+        // Stage changed (Loaded): the cached route is to the old stop. Drop it
+        // so the new one is fetched now, not after the 60s re-route throttle.
+        if (cached && target && metres(cached.to.lat, cached.to.lng, target.lat, target.lng) >= 1) {
+          delete routeCache[d.id]
+        }
+        const route = routeCache[d.id]
         const truckLoc = latestByUser[d.driver_id]
-        if (truckLoc) {
+        if (truckLoc && target) {
           const tLat = parseFloat(truckLoc.lat)
           const tLng = parseFloat(truckLoc.lng)
-          // Draw immediately from whatever we have — the road route if it is
+          // Draw immediately from whatever we have: the road route if it is
           // already cached, otherwise the straight line. The routing call never
           // gates the map: it upgrades the line in place when it lands, and if
           // it never lands the straight line is simply what stays on screen.
-          const pts = (cached && cached.latlngs)
-            ? routeFrom(cached.latlngs, tLat, tLng)
-            : [[tLat, tLng], [lat, lng]]
+          const pts = (route && route.latlngs)
+            ? routeFrom(route.latlngs, tLat, tLng)
+            : [[tLat, tLng], [target.lat, target.lng]]
+          const lineColor = (next.kind === 'pickup') ? BRAND_BLUE : color
           if (routeLines[d.id]) {
             routeLines[d.id].setLatLngs(pts)
-            routeLines[d.id].setStyle({ color })
+            routeLines[d.id].setStyle({ color: lineColor })
           } else {
-            routeLines[d.id] = L.polyline(pts, { color, weight: 3, opacity: 0.65, dashArray: '8,7' }).addTo(map)
+            routeLines[d.id] = L.polyline(pts, { color: lineColor, weight: 3, opacity: 0.65, dashArray: '8,7' }).addTo(map)
           }
           // Remember where the truck is now so a route arriving asynchronously
           // snaps to the current position rather than a stale one.
           truckPos[d.id] = [tLat, tLng]
-          queueRoute(d.id, { lat: tLat, lng: tLng }, { lat: lat, lng: lng })
+          queueRoute(d.id, { lat: tLat, lng: tLng }, target)
         } else if (routeLines[d.id]) {
           map.removeLayer(routeLines[d.id]); delete routeLines[d.id]
         }
+      })
+      Object.keys(pickupMarkers).forEach(id => {
+        if (!pickupIds.has(id)) { map.removeLayer(pickupMarkers[id]); delete pickupMarkers[id] }
       })
       Object.keys(dispatchMarkers).forEach(id => {
         if (!activeDispatchIds.has(id)) { map.removeLayer(dispatchMarkers[id]); delete dispatchMarkers[id] }

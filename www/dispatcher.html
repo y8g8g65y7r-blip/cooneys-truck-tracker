@@ -219,6 +219,52 @@
     .dispatch-item.accepted { border-left: 3px solid #22c55e; padding-left: 9px; }
     .dispatch-item.pending-accept { border-left: 3px solid #eab308; padding-left: 9px; }
 
+    /* --- Two-stop jobs (0011) ------------------------------------------------
+       Stage pills sit in the same slot as Pending/Accepted so the board keeps
+       one status per row. To pickup = brand blue (moving, nothing to do),
+       Loaded = amber-brown (the half-way event dispatch was watching for). */
+    .status-pill.to-pickup { background: #e0eafc; color: #0b3f8c; }
+    .status-pill.loaded { background: #fdecd3; color: #92400e; }
+    .dispatch-item.stage-to-pickup { border-left: 3px solid var(--brand-blue); padding-left: 9px; }
+    .dispatch-item.stage-loaded { border-left: 3px solid #b45309; padding-left: 9px; }
+    .route-from { font-weight: 800; }
+    .route-arrow { color: #9aa0a6; margin: 0 3px; }
+    /* A job that just flipped to Loaded glows once, so a dispatcher glancing
+       at the board sees WHICH truck changed without a push to anybody. */
+    @keyframes loadedFlash { 0% { background: #fde7c7; } 100% { background: transparent; } }
+    .dispatch-item.just-loaded { animation: loadedFlash 4s ease-out 1; }
+
+    .pickup-toggle {
+      background: none; border: 1.5px dashed #cbd5e1; color: var(--brand-blue);
+      border-radius: 10px; padding: 11px 14px; width: 100%; text-align: left;
+      font-size: 13px; font-weight: 700; cursor: pointer; margin-bottom: 14px;
+    }
+    .pickup-toggle:active { background: #f4f7fc; }
+    .pickup-block {
+      display: none; border: 1.5px solid #e2e8f0; border-left: 4px solid #b45309;
+      border-radius: 12px; padding: 14px 14px 2px; margin-bottom: 14px; background: #fffdf9;
+    }
+    .pickup-block.open { display: block; }
+    .pickup-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .pickup-head .t { font-size: 11px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: #92400e; }
+    .pickup-remove { background: none; border: none; color: #6c757d; font-size: 12px; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 4px; }
+    .field-hint { font-size: 11px; color: #9aa0a6; margin-top: 5px; }
+
+    .modal-stops { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .modal-stop { display: flex; gap: 10px; align-items: baseline; font-size: 12.5px; }
+    .modal-stop .n {
+      flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; background: #eef0f3; color: #6c757d;
+      font-size: 11px; font-weight: 900; display: inline-flex; align-items: center; justify-content: center;
+    }
+    .modal-stop.done .n { background: #15803d; color: #fff; }
+    .modal-stop.current .n { background: var(--brand-blue); color: #fff; }
+    .modal-stop .k { color: #9aa0a6; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.6px; margin-right: 4px; }
+    .modal-stop .v { color: #15161a; font-weight: 700; overflow-wrap: anywhere; }
+    .btn-mark-loaded {
+      margin-top: 10px; background: #fff; border: 1.5px solid #b45309; color: #92400e;
+      border-radius: 8px; padding: 7px 12px; font-size: 12px; font-weight: 800; cursor: pointer;
+    }
+
     .btn-messages {
       background: #eaf1ff;
       border: 1px solid #cfe0ff;
@@ -623,8 +669,32 @@
         </select>
       </div>
 
+      <!-- Optional first stop. Closed = a single-stop dispatch, exactly as before. -->
+      <button type="button" class="pickup-toggle" id="pickupToggle" onclick="setPickupOpen(true)">+ Add a pickup stop first (e.g. Burnco)</button>
+      <div class="pickup-block" id="pickupBlock">
+        <div class="pickup-head">
+          <span class="t">1 · Pickup</span>
+          <button type="button" class="pickup-remove" onclick="setPickupOpen(false)">Remove pickup</button>
+        </div>
+        <div class="field">
+          <label for="pickupName">Pickup name</label>
+          <input type="text" id="pickupName" list="recentPickups" placeholder="e.g. Burnco" autocomplete="off">
+          <datalist id="recentPickups"></datalist>
+        </div>
+        <div class="field">
+          <label for="pickupAddress">Pickup address</label>
+          <div class="address-row">
+            <input type="text" id="pickupAddress" placeholder="e.g. 3915 72 Ave SE, Calgary, AB">
+            <button class="btn-geocode" id="pickupGeocodeBtn" onclick="geocodePickup()">Find 📍</button>
+          </div>
+          <div class="geocode-result" id="pickupGeocodeResult"></div>
+          <div class="geocode-error" id="pickupGeocodeError"></div>
+          <div class="field-hint">Press Find so the map can pin it and the job can move on by itself when the truck leaves the pickup.</div>
+        </div>
+      </div>
+
       <div class="field">
-        <label for="siteAddress">Site Address</label>
+        <label for="siteAddress" id="siteAddressLabel">Site Address</label>
         <div class="address-row">
           <input type="text" id="siteAddress" placeholder="e.g. 123 Main St SW, Calgary, AB">
           <button class="btn-geocode" id="geocodeBtn" onclick="geocodeAddress()">Find 📍</button>
@@ -682,6 +752,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <script src="legs.js"></script>
+  <script src="stops.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -690,6 +761,17 @@
     let currentUser = null
     let geocodedLat = null
     let geocodedLng = null
+    // Optional pickup stop (0011). Coordinates only ever come from an explicit
+    // Find or from picking a recent pickup, never a silent auto-geocode, which
+    // could send a driver to the wrong pit.
+    let pickupOpen = false
+    let pickupLat = null
+    let pickupLng = null
+    let recentPickups = {}   // lower-cased name -> { name, address, lat, lng }
+    // picked_up_at per active job as last rendered, so a job that flips to
+    // Loaded between two refreshes can be flashed on the board.
+    let lastPickedUp = {}
+    let activeListPainted = false
     let driverMap = {}
     let historyLoaded = false
     let historyDriverFilter = null
@@ -974,8 +1056,8 @@
             <div class="dispatch-item clickable" onclick="openHistoryDetail('${id}')">
               <span class="dispatch-unit">U${escapeHtml(unit)}</span>
               <div class="dispatch-info">
-                <div class="addr">${escapeHtml(d.site_address)}</div>
-                <div class="meta">${escapeHtml(name)} · ${timeStr}${d.completion_photo_path ? '<span class="photo-badge">Photo</span>' : ''}<span data-ticket-for="${id}"></span></div>
+                <div class="addr">${routeHtml(d)}</div>
+                <div class="meta">${escapeHtml(name)} · ${timeStr}${d.picked_up_at ? ' · loaded ' + escapeHtml(clock(d.picked_up_at)) : ''}${d.completion_photo_path ? '<span class="photo-badge">Photo</span>' : ''}<span data-ticket-for="${id}"></span></div>
               </div>
               <span class="history-status ${escapeHtml(d.status)}">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span>
               <span class="dispatch-chevron">›</span>
@@ -1009,6 +1091,16 @@
       document.querySelectorAll('[data-ticket-for]').forEach(el => {
         if (seen.has(el.dataset.ticketFor)) el.innerHTML = '<span class="ticket-badge">Ticket</span>'
       })
+    }
+
+    function clock(iso) {
+      return iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+    }
+
+    // "Burnco -> 123 Main St SW" with the pickup emphasised; plain site otherwise.
+    function routeHtml(d) {
+      if (!DispatchStops.hasPickup(d)) return escapeHtml(d.site_address)
+      return `<span class="route-from">${escapeHtml(DispatchStops.pickupLabel(d))}</span><span class="route-arrow">→</span>${escapeHtml(d.site_address)}`
     }
 
     function fmtTime(iso) {
@@ -1045,7 +1137,7 @@
       const unit = driver?.unit_number || '—'
       const name = driver?.full_name || 'Unknown driver'
 
-      document.getElementById('modalTitle').textContent = d.site_address
+      document.getElementById('modalTitle').textContent = DispatchStops.routeText(d)
       document.getElementById('modalDriver').textContent = `Unit ${unit} — ${name}`
 
       const notesEl = document.getElementById('modalNotes')
@@ -1057,11 +1149,29 @@
 
       const stillOpen = d.status === 'active'
       const duration = fmtDuration(d.accepted_at, d.completed_at || (stillOpen ? new Date().toISOString() : null))
+      const twoStop = DispatchStops.hasPickup(d)
+      const st = DispatchStops.stage(d)
+      const loaded = !!d.picked_up_at
+      const how = DispatchStops.sourceText(d.pickup_source)
+      const stopsHtml = !twoStop ? '' : `
+        <div class="modal-stops">
+          <div class="modal-stop ${loaded ? 'done' : (stillOpen ? 'current' : '')}">
+            <span class="n">${loaded ? '✓' : '1'}</span>
+            <span><span class="k">Pickup</span><span class="v">${escapeHtml(DispatchStops.pickupLabel(d))}${d.pickup_name ? ' · ' + escapeHtml(d.pickup_address) : ''}</span></span>
+          </div>
+          <div class="modal-stop ${loaded && stillOpen ? 'current' : ''}">
+            <span class="n">2</span>
+            <span><span class="k">Drop-off</span><span class="v">${escapeHtml(d.site_address)}</span></span>
+          </div>
+        </div>`
       document.getElementById('modalTimeline').innerHTML = `
+        ${stopsHtml}
         <div class="modal-timeline-row"><span class="label">Sent</span><span class="value">${fmtTime(d.created_at)}</span></div>
         <div class="modal-timeline-row"><span class="label">Accepted</span><span class="value">${fmtTime(d.accepted_at)}</span></div>
-        <div class="modal-timeline-row"><span class="label">${stillOpen ? 'Status' : (d.status === 'cancelled' ? 'Cancelled' : 'Completed')}</span><span class="value">${stillOpen ? 'Still open' : fmtTime(d.completed_at)}</span></div>
+        ${twoStop ? `<div class="modal-timeline-row"><span class="label">Loaded</span><span class="value">${loaded ? fmtTime(d.picked_up_at) + (how ? ' (' + escapeHtml(how) + ')' : '') : 'Not yet'}</span></div>` : ''}
+        <div class="modal-timeline-row"><span class="label">${stillOpen ? 'Status' : (d.status === 'cancelled' ? 'Cancelled' : 'Completed')}</span><span class="value">${stillOpen ? (twoStop ? escapeHtml(st.label) : 'Still open') : fmtTime(d.completed_at)}</span></div>
         ${duration ? `<div class="modal-timeline-row"><span class="label">${stillOpen ? 'Open for' : 'On job'}</span><span class="value">${duration}</span></div>` : ''}
+        ${twoStop && stillOpen && !loaded ? `<div><button class="btn-mark-loaded" data-mark-loaded="${escapeHtml(d.id)}">Mark loaded for the driver</button></div>` : ''}
       `
 
       Array.from(document.getElementById('modalScope').children).forEach(b => {
@@ -1107,8 +1217,9 @@
         return
       }
 
-      const anchors = (d.lat != null && d.lng != null)
-        ? [{ lat: d.lat, lng: d.lng, label: shortAddress(d.site_address) }] : []
+      // Pickup and drop-off both named, so a Burnco shuttle reads
+      // "Burnco -> 123 Main St, 123 Main St -> Burnco" in the leg list.
+      const anchors = DispatchStops.anchors(d, shortAddress(d.site_address))
       const r = TruckLegs.segment(pings, { anchors })
 
       legsEl.innerHTML = renderLegs(r, truncated)
@@ -1333,6 +1444,24 @@
       else if (all.length > 1) detailMap.fitBounds(L.latLngBounds(all), { padding: [20, 20] })
     }
 
+    // The office can mark a job loaded when the driver radios it in, or when
+    // the driver is still on an older build that has no Loaded button.
+    document.getElementById('modalTimeline').addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-mark-loaded]')
+      if (!btn) return
+      const id = btn.dataset.markLoaded
+      if (!confirm('Mark this job loaded? The driver\'s directions switch to the drop-off.')) return
+      btn.disabled = true
+      const now = new Date().toISOString()
+      const { error } = await sb.from('dispatches')
+        .update({ picked_up_at: now, pickup_source: 'dispatch' })
+        .eq('id', id).is('picked_up_at', null)
+      if (error) { btn.disabled = false; alert('Could not mark loaded: ' + error.message); return }
+      if (jobById[id]) { jobById[id].picked_up_at = now; jobById[id].pickup_source = 'dispatch' }
+      loadActiveDispatches()
+      if (openJobId === id) openJobDetail(id, openScope)
+    })
+
     document.getElementById('modalScope').addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-scope]')
       if (!btn || !openJobId) return
@@ -1360,48 +1489,127 @@
       select.innerHTML = data.map(d => `<option value="${escapeHtml(d.id)}">Unit ${escapeHtml(d.unit_number || '—')} — ${escapeHtml(d.full_name)}</option>`).join('')
     }
 
-    async function geocodeAddress() {
-      const address = document.getElementById('siteAddress').value.trim()
-      if (!address) return
-      const btn = document.getElementById('geocodeBtn')
-      const resultEl = document.getElementById('geocodeResult')
-      const errorEl = document.getElementById('geocodeError')
+    // Nominatim lookup into one address row. Returns {lat,lng} or null.
+    async function geocodeInto(inputId, btnId, resultId, errorId) {
+      const address = document.getElementById(inputId).value.trim()
+      if (!address) return null
+      const btn = document.getElementById(btnId)
+      const resultEl = document.getElementById(resultId)
+      const errorEl = document.getElementById(errorId)
       btn.disabled = true
       btn.textContent = '...'
       resultEl.style.display = 'none'
       errorEl.style.display = 'none'
-
+      let found = null
       try {
         const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`
         const res = await fetch(url, { headers: { 'User-Agent': 'CooneysTruckTracker/1.0' } })
         const data = await res.json()
         if (data.length > 0) {
-          geocodedLat = parseFloat(data[0].lat)
-          geocodedLng = parseFloat(data[0].lon)
+          found = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
           resultEl.textContent = `✓ Found: ${data[0].display_name}`
           resultEl.style.display = 'block'
         } else {
           errorEl.textContent = 'Address not found. Try a more specific address.'
           errorEl.style.display = 'block'
-          geocodedLat = null
-          geocodedLng = null
         }
       } catch (e) {
         errorEl.textContent = 'Could not look up address. Check your connection.'
         errorEl.style.display = 'block'
       }
-
       btn.disabled = false
       btn.textContent = 'Find 📍'
+      return found
+    }
+
+    async function geocodeAddress() {
+      const r = await geocodeInto('siteAddress', 'geocodeBtn', 'geocodeResult', 'geocodeError')
+      geocodedLat = r ? r.lat : null
+      geocodedLng = r ? r.lng : null
+    }
+
+    async function geocodePickup() {
+      const r = await geocodeInto('pickupAddress', 'pickupGeocodeBtn', 'pickupGeocodeResult', 'pickupGeocodeError')
+      pickupLat = r ? r.lat : null
+      pickupLng = r ? r.lng : null
+    }
+
+    function setPickupOpen(open) {
+      pickupOpen = open
+      document.getElementById('pickupBlock').classList.toggle('open', open)
+      document.getElementById('pickupToggle').style.display = open ? 'none' : 'block'
+      document.getElementById('siteAddressLabel').textContent = open ? '2 · Drop-off / Site Address' : 'Site Address'
+      if (open) {
+        loadRecentPickups()
+        document.getElementById('pickupName').focus()
+      } else {
+        document.getElementById('pickupName').value = ''
+        document.getElementById('pickupAddress').value = ''
+        document.getElementById('pickupGeocodeResult').style.display = 'none'
+        document.getElementById('pickupGeocodeError').style.display = 'none'
+        pickupLat = null
+        pickupLng = null
+      }
+    }
+
+    // Editing the pickup address after Find invalidates the pin; otherwise
+    // the driver is routed to wherever the OLD text geocoded to.
+    document.getElementById('pickupAddress').addEventListener('input', () => {
+      pickupLat = null
+      pickupLng = null
+      document.getElementById('pickupGeocodeResult').style.display = 'none'
+    })
+
+    // Picking a recent pickup ("Burnco") fills its address and pin in one go.
+    document.getElementById('pickupName').addEventListener('input', (e) => {
+      const hit = recentPickups[e.target.value.trim().toLowerCase()]
+      if (!hit) return
+      document.getElementById('pickupAddress').value = hit.address
+      pickupLat = hit.lat
+      pickupLng = hit.lng
+      const res = document.getElementById('pickupGeocodeResult')
+      res.textContent = hit.lat != null ? '✓ Pin from a previous dispatch' : ''
+      res.style.display = hit.lat != null ? 'block' : 'none'
+      document.getElementById('pickupGeocodeError').style.display = 'none'
+    })
+
+    // The last 100 dispatches with a pickup, newest first, one entry per name.
+    async function loadRecentPickups() {
+      const { data, error } = await sb.from('dispatches')
+        .select('pickup_name, pickup_address, pickup_lat, pickup_lng, created_at')
+        .not('pickup_address', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(100)
+      if (error || !data) return
+      const map = {}
+      data.forEach(r => {
+        const name = (r.pickup_name || '').trim()
+        if (!name) return
+        const key = name.toLowerCase()
+        // Prefer the newest entry that actually has a pin.
+        if (map[key] && (map[key].lat != null || r.pickup_lat == null)) return
+        map[key] = { name, address: r.pickup_address,
+                     lat: r.pickup_lat != null ? parseFloat(r.pickup_lat) : null,
+                     lng: r.pickup_lng != null ? parseFloat(r.pickup_lng) : null }
+      })
+      recentPickups = map
+      document.getElementById('recentPickups').innerHTML = Object.values(map)
+        .map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.address)}</option>`).join('')
     }
 
     async function submitDispatch() {
       const driverId = document.getElementById('driverSelect').value
       const address = document.getElementById('siteAddress').value.trim()
       const notes = document.getElementById('notes').value.trim()
+      const pickupName = pickupOpen ? document.getElementById('pickupName').value.trim() : ''
+      const pickupAddress = pickupOpen ? document.getElementById('pickupAddress').value.trim() : ''
 
       if (!driverId || !address) {
         alert('Please select a driver and enter a site address.')
+        return
+      }
+      if (pickupOpen && !pickupAddress) {
+        alert('Enter the pickup address, or tap "Remove pickup" to send a single-stop dispatch.')
         return
       }
 
@@ -1415,7 +1623,13 @@
         lat: geocodedLat,
         lng: geocodedLng,
         notes: notes || null,
-        created_by: currentUser.id
+        created_by: currentUser.id,
+        // All null for a single-stop job; that is what keeps it behaving
+        // exactly as before on every screen and every older build.
+        pickup_name: pickupAddress ? (pickupName || null) : null,
+        pickup_address: pickupAddress || null,
+        pickup_lat: pickupAddress ? pickupLat : null,
+        pickup_lng: pickupAddress ? pickupLng : null
       }).select().single()
 
       if (error) {
@@ -1473,6 +1687,7 @@
         document.getElementById('geocodeResult').style.display = 'none'
         geocodedLat = null
         geocodedLng = null
+        setPickupOpen(false)
         btn.textContent = 'Send Dispatch'
         btn.disabled = false
         document.getElementById('successMsg').style.display = 'none'
@@ -1510,9 +1725,21 @@
       // message composer below may hold text a dispatcher is mid-typing, and
       // an unconditional rebuild (the old behaviour) would wipe it and steal
       // focus on every 20s poll. See lastActiveSig's declaration.
-      const sig = JSON.stringify(data.map(d => [d.id, d.accepted_at, d.site_address, d.notes]))
+      const sig = JSON.stringify(data.map(d => [d.id, d.accepted_at, d.site_address, d.notes,
+        d.pickup_name, d.pickup_address, d.picked_up_at, d.pickup_source]))
       if (sig === lastActiveSig) { data.forEach(d => { jobById[d.id] = d }); return }
       lastActiveSig = sig
+
+      // Which jobs flipped to Loaded since the last render. Not on the very
+      // first paint (everything would "flip"), only on a real transition.
+      const justLoaded = new Set()
+      const firstPaint = Object.keys(lastPickedUp).length === 0 && !activeListPainted
+      data.forEach(d => {
+        if (!firstPaint && d.picked_up_at && !lastPickedUp[d.id]) justLoaded.add(d.id)
+      })
+      lastPickedUp = {}
+      data.forEach(d => { lastPickedUp[d.id] = d.picked_up_at || null })
+      activeListPainted = true
 
       data.forEach(d => { jobById[d.id] = d })
       list.innerHTML = data.map(d => {
@@ -1521,18 +1748,33 @@
         const name = driver?.full_name || 'Unknown driver'
         const timeStr = new Date(d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         const accepted = !!d.accepted_at
-        const pill = accepted
-          ? '<span class="status-pill accepted">Accepted</span>'
-          : '<span class="status-pill pending">Pending</span>'
+        const st = DispatchStops.stage(d).key
+        // One pill per row. A two-stop job shows its STAGE once accepted (or
+        // loaded); a single-stop job is exactly the old Pending/Accepted.
+        let pill, rowCls
+        if (st === 'loaded') {
+          pill = `<span class="status-pill loaded">Loaded ${escapeHtml(clock(d.picked_up_at))}</span>`
+          rowCls = 'stage-loaded'
+        } else if (st === 'to_pickup' && accepted) {
+          pill = '<span class="status-pill to-pickup">To pickup</span>'
+          rowCls = 'stage-to-pickup'
+        } else if (accepted) {
+          pill = '<span class="status-pill accepted">Accepted</span>'
+          rowCls = 'accepted'
+        } else {
+          pill = '<span class="status-pill pending">Pending</span>'
+          rowCls = 'pending-accept'
+        }
+        if (justLoaded.has(d.id)) rowCls += ' just-loaded'
         const id = escapeHtml(d.id)
         const panelOpen = openMessagePanels.has(d.id)
         const unread = unreadMessagePanels.has(d.id)
         return `
           <div class="dispatch-row">
-            <div class="dispatch-item clickable ${accepted ? 'accepted' : 'pending-accept'}" data-open="${id}">
+            <div class="dispatch-item clickable ${rowCls}" data-open="${id}">
               <span class="dispatch-unit">U${escapeHtml(unit)}</span>
               <div class="dispatch-info">
-                <div class="addr">${escapeHtml(d.site_address)}</div>
+                <div class="addr">${routeHtml(d)}</div>
                 <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
               </div>
               ${pill}

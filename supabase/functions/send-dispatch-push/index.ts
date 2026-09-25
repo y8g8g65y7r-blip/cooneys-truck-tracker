@@ -117,7 +117,7 @@ Deno.serve(async (req) => {
     // from ever diverging, and guarantees every push is backed by a real row.
     const { data: dispatch, error: dispatchErr } = await admin
       .from('dispatches')
-      .select('id, driver_id, site_address, status')
+      .select('id, driver_id, site_address, status, pickup_name, pickup_address')
       .eq('id', dispatchId)
       .maybeSingle()
 
@@ -140,7 +140,15 @@ Deno.serve(async (req) => {
     }
 
     const driverId = dispatch.driver_id
-    const address = String(dispatch.site_address ?? 'New dispatch').slice(0, MAX_ALERT_BODY)
+    // Two-stop job (0011): say BOTH stops, pickup first. This is also the only
+    // way a driver still on an older build (which shows just the drop-off on
+    // its card) learns there is a pickup at all.
+    const pickup = dispatch.pickup_address
+      ? String(dispatch.pickup_name || dispatch.pickup_address).trim()
+      : ''
+    const address = (pickup
+      ? `Pickup: ${pickup}, then drop-off: ${dispatch.site_address ?? ''}`
+      : String(dispatch.site_address ?? 'New dispatch')).slice(0, MAX_ALERT_BODY)
 
     const { data: driverProfile, error: profileErr } = await admin
       .from('profiles')

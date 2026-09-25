@@ -187,6 +187,53 @@
     .btn-messages:active { background: #d9e7ff; }
     .btn-messages.unread { border-color: #f59e0b; background: #fef3c7; color: #92400e; }
 
+    /* --- Two-stop job (pickup -> drop-off, migration 0011) --------------------
+       A numbered rail so the ORDER reads at a glance from the seat: the stop
+       the truck is heading for is solid brand blue, a finished stop is struck
+       green, the one after is quiet. Single-stop jobs never render this. */
+    .stop-list { position: relative; margin: 4px 0 8px; }
+    .stop { display: flex; gap: 12px; align-items: flex-start; position: relative; padding: 8px 0; }
+    .stop + .stop::before {
+      /* the rail joining the two numbers */
+      content: ''; position: absolute; left: 13px; top: -10px; height: 20px;
+      border-left: 2px dashed #cbd5e1;
+    }
+    .stop-dot {
+      flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 900; background: #eef0f3; color: #6c757d;
+    }
+    .stop.current .stop-dot { background: var(--brand-blue); color: #fff; box-shadow: 0 0 0 4px #dbe7fb; }
+    .stop.done .stop-dot { background: #15803d; color: #fff; }
+    .stop-body { flex: 1; min-width: 0; }
+    .stop-kind { font-size: 10.5px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: #6c757d; }
+    .stop.current .stop-kind { color: var(--brand-blue); }
+    .stop-name { font-size: 17px; font-weight: 800; color: #15161a; overflow-wrap: anywhere; line-height: 1.25; }
+    .stop.done .stop-name { color: #6c757d; }
+    .stop-addr { font-size: 13px; color: #6c757d; overflow-wrap: anywhere; }
+    .stop-state { font-size: 12px; font-weight: 700; color: #15803d; margin-top: 3px; }
+    .stop-state .undo {
+      background: none; border: none; color: var(--brand-blue); font-weight: 700; font-size: 12px;
+      text-decoration: underline; padding: 6px 4px; margin: -6px 0; cursor: pointer;
+    }
+    .stop-go {
+      flex-shrink: 0; align-self: center; min-width: 48px; min-height: 44px;
+      border: 1.5px solid #cfe0ff; background: #eaf1ff; color: var(--brand-blue);
+      border-radius: 10px; font-size: 12px; font-weight: 800; cursor: pointer;
+    }
+    .stop-go:active { background: #d9e7ff; }
+    /* One tap at the pit. Amber, not green or blue: it must not be mistaken for
+       Accept (green) or Directions (blue) by a thumb in a moving cab. #b45309
+       with white is 5.0:1. */
+    .btn-loaded {
+      width: 100%; padding: 18px; border: none; border-radius: 14px;
+      font-size: 16px; font-weight: 800; letter-spacing: 0.3px; cursor: pointer;
+      background: #b45309; color: #ffffff;
+    }
+    .btn-loaded .sub { display: block; font-size: 11.5px; font-weight: 700; opacity: 0.85; margin-top: 2px; letter-spacing: 0; }
+    .btn-loaded:active { background: #92400e; }
+    .btn-loaded:disabled { background: #78350f; cursor: not-allowed; }
+
     /* --- Message panel -------------------------------------------------------
        Scoped to ONE dispatch (Dario's ask was "on dispatches", not a standing
        DM), so it lives inline in that job's own card rather than as a separate
@@ -869,6 +916,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <script src="legs.js"></script>
+  <script src="stops.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
@@ -1055,7 +1103,8 @@
       const list = document.getElementById('dispatchList')
       const countEl = document.getElementById('jobCount')
 
-      const sig = JSON.stringify(activeDispatches.map(d => [d.id, d.accepted_at, d.site_address, d.notes, d.lat, d.lng]))
+      const sig = JSON.stringify(activeDispatches.map(d => [d.id, d.accepted_at, d.site_address, d.notes, d.lat, d.lng,
+        d.pickup_name, d.pickup_address, d.pickup_lat, d.pickup_lng, d.picked_up_at, d.pickup_source]))
       if (sig === lastRenderSig && hasRenderedOnce && !focusDispatchId) return
       lastRenderSig = sig
       hasRenderedOnce = true
@@ -1083,15 +1132,19 @@
         const id = escapeHtml(d.id)
         const panelOpen = openMessagePanels.has(d.id)
         const unread = unreadMessagePanels.has(d.id)
+        const twoStop = DispatchStops.hasPickup(d)
+        const stage = DispatchStops.stage(d).key
         return `
           <div class="card ${accepted ? 'dispatch-accepted' : ''}" data-dispatch="${id}">
             <div class="card-title">${many ? 'Job ' + (i + 1) : 'Current Dispatch'}</div>
             ${accepted ? '<div class="accept-badge">✓ Accepted</div>' : ''}
-            <div class="dispatch-address">${escapeHtml(d.site_address)}</div>
+            ${twoStop ? renderStops(d) : `<div class="dispatch-address">${escapeHtml(d.site_address)}</div>`}
             ${d.notes ? `<div class="dispatch-notes">${escapeHtml(d.notes)}</div>` : ''}
             <div class="card-actions">
               ${accepted ? '' : `<button class="btn-accept" data-action="accept" data-id="${id}">Accept Dispatch</button>`}
-              <button class="btn-directions" data-action="directions" data-id="${id}">Get Directions</button>
+              <button class="btn-directions" data-action="directions" data-id="${id}">${
+                !twoStop ? 'Get Directions' : (stage === 'to_pickup' ? 'Directions to Pickup' : 'Directions to Drop-off')}</button>
+              ${stage === 'to_pickup' ? `<button class="btn-loaded" data-action="loaded" data-id="${id}">Loaded / Picked Up<span class="sub">Opens directions to the drop-off</span></button>` : ''}
               <button class="btn-complete" data-action="complete" data-id="${id}">Mark Job Complete</button>
               <button class="btn-messages${unread ? ' unread' : ''}" data-action="messages" data-id="${id}">${unread ? '🔴 New message' : '💬 Messages'}</button>
             </div>
@@ -1135,6 +1188,87 @@
         if (activeDispatches.some(x => x.id === id)) loadMessages(id)
         else openMessagePanels.delete(id)
       })
+    }
+
+    // --- Two-stop jobs (pickup -> drop-off) -----------------------------------
+    // Both stops, in order, numbered. Only ever called for a job that has a
+    // pickup; a single-stop job renders exactly the old address line.
+    function renderStops(d) {
+      const id = escapeHtml(d.id)
+      const loaded = !!d.picked_up_at
+      const pickupName = d.pickup_name ? String(d.pickup_name).trim() : ''
+      const when = loaded ? new Date(d.picked_up_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+      const how = d.pickup_source === 'geofence' ? ' · auto' : ''
+      return `
+        <div class="stop-list">
+          <div class="stop ${loaded ? 'done' : 'current'}">
+            <span class="stop-dot">${loaded ? '✓' : '1'}</span>
+            <div class="stop-body">
+              <div class="stop-kind">Pickup</div>
+              <div class="stop-name">${escapeHtml(pickupName || d.pickup_address)}</div>
+              ${pickupName ? `<div class="stop-addr">${escapeHtml(d.pickup_address)}</div>` : ''}
+              ${loaded ? `<div class="stop-state">Loaded ${escapeHtml(when)}${how} <button class="undo" data-action="undo-loaded" data-id="${id}">Undo</button></div>` : ''}
+            </div>
+            <button class="stop-go" data-action="nav-stop" data-kind="pickup" data-id="${id}" aria-label="Directions to pickup">Go</button>
+          </div>
+          <div class="stop ${loaded ? 'current' : ''}">
+            <span class="stop-dot">2</span>
+            <div class="stop-body">
+              <div class="stop-kind">Drop-off</div>
+              <div class="stop-name">${escapeHtml(d.site_address)}</div>
+            </div>
+            <button class="stop-go" data-action="nav-stop" data-kind="dropoff" data-id="${id}" aria-label="Directions to drop-off">Go</button>
+          </div>
+        </div>`
+    }
+
+    function openDirections(stop) {
+      const url = DispatchStops.directionsUrl(stop)
+      if (url) window.open(url, '_blank')
+    }
+
+    // One tap at the pit. Directions to the drop-off open FIRST, synchronously
+    // inside the tap: a window.open after an await can be swallowed as a popup
+    // in a browser, and the driver's next move is to drive regardless of
+    // whether the office has heard yet. If the write fails the geofence still
+    // advances the job server-side when the truck leaves the pit.
+    async function markLoaded(id, btn) {
+      const d = activeDispatches.find(x => x.id === id)
+      if (!d) return
+      openDirections(DispatchStops.stopOf(d, 'dropoff'))
+      btn.disabled = true
+      btn.textContent = 'Saving...'
+      const patch = { picked_up_at: new Date().toISOString() }
+      // Loading the truck is as clear an acceptance as there is. The trigger
+      // stamps both with server time either way.
+      if (!d.accepted_at) patch.accepted_at = new Date().toISOString()
+      const { error } = await sb.from('dispatches').update(patch).eq('id', id)
+      if (error) {
+        btn.disabled = false
+        btn.innerHTML = 'Loaded / Picked Up<span class="sub">Opens directions to the drop-off</span>'
+        setOffline(true, 'Loaded not saved — no connection. It will update on its own once you leave the pickup.')
+        return
+      }
+      setOffline(false)
+      const cur = activeDispatches.find(x => x.id === id)
+      if (cur) {
+        cur.picked_up_at = new Date().toISOString()
+        cur.pickup_source = 'tap'
+        if (!cur.accepted_at) cur.accepted_at = cur.picked_up_at
+      }
+      renderDispatches()
+      loadDispatch()
+    }
+
+    async function undoLoaded(id) {
+      if (!confirm('Undo "Loaded"? Directions go back to the pickup.')) return
+      const { error } = await sb.from('dispatches').update({ picked_up_at: null }).eq('id', id)
+      if (error) { setOffline(true, 'Could not undo — no connection. Try again when you have signal.'); return }
+      setOffline(false)
+      const cur = activeDispatches.find(x => x.id === id)
+      if (cur) { cur.picked_up_at = null; cur.pickup_source = 'undone' }
+      renderDispatches()
+      loadDispatch()
     }
 
     // --- Dispatch messages ----------------------------------------------------
@@ -1254,6 +1388,13 @@
       const id = btn.dataset.id
       if (btn.dataset.action === 'accept') acceptDispatch(id, btn)
       else if (btn.dataset.action === 'directions') getDirections(id)
+      else if (btn.dataset.action === 'loaded') markLoaded(id, btn)
+      else if (btn.dataset.action === 'undo-loaded') undoLoaded(id)
+      else if (btn.dataset.action === 'nav-stop') {
+        const d = activeDispatches.find(x => x.id === id)
+        if (!d) return
+        openDirections(DispatchStops.stopOf(d, btn.dataset.kind))
+      }
       else if (btn.dataset.action === 'complete') markComplete(id, btn)
       else if (btn.dataset.action === 'messages') toggleMessagePanel(id)
       else if (btn.dataset.action === 'quick-reply') sendMessageText(id, btn.dataset.text)
@@ -1328,8 +1469,8 @@
         const id = escapeHtml(d.id)
         return `
           <div class="history-item">
-            <div class="addr">${escapeHtml(d.site_address)}</div>
-            <div class="meta">${statusStr} · ${timeStr}</div>
+            <div class="addr">${escapeHtml(DispatchStops.routeText(d))}</div>
+            <div class="meta">${statusStr} · ${timeStr}${d.picked_up_at ? ' · loaded ' + new Date(d.picked_up_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
             ${d.completion_photo_path ? `<img class="history-photo" data-photo="${escapeHtml(d.completion_photo_path)}" alt="Photo attached to this job">` : ''}
             <button class="legs-toggle" data-legs="${id}">Show trip breakdown</button>
             <div class="legs-body" data-legs-body="${id}"></div>
@@ -1370,8 +1511,9 @@
         const from = new Date(d.accepted_at || d.created_at).toISOString()
         const to = new Date(d.completed_at || Date.now()).toISOString()
         const { rows } = await TruckLegs.fetchPings(sb, currentUser.id, from, to)
-        const anchors = (d.lat != null && d.lng != null)
-          ? [{ lat: d.lat, lng: d.lng, label: 'Site' }] : []
+        // Pickup + drop-off both named, so a Burnco shuttle reads
+        // "Burnco -> Site, Site -> Burnco" instead of lettered stops.
+        const anchors = DispatchStops.anchors(d, 'Site')
         body.innerHTML = renderLegs(TruckLegs.segment(rows, { anchors }))
         body.dataset.loaded = '1'
       } catch (err) {
@@ -1418,10 +1560,9 @@
     function getDirections(id) {
       const d = activeDispatches.find(x => x.id === id)
       if (!d) return
-      const dest = (d.lat != null && d.lng != null)
-        ? `${d.lat},${d.lng}`
-        : encodeURIComponent(d.site_address)
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}`, '_blank')
+      // Pickup first while not loaded, the drop-off after. A single-stop job
+      // resolves to the drop-off, i.e. exactly the old behaviour.
+      openDirections(DispatchStops.nextStop(d))
     }
 
     // --- Complete a job, optionally with a photo -----------------------------
@@ -1435,7 +1576,7 @@
       pendingPhotoDataUrl = null
       pendingTicket = null
       renderTicketSlot()
-      document.getElementById('sheetAddr').textContent = d ? d.site_address : ''
+      document.getElementById('sheetAddr').textContent = d ? DispatchStops.routeText(d) : ''
       setPhotoPreview(null)
       sheetError('')
       const confirmBtn = document.getElementById('btnConfirmComplete')

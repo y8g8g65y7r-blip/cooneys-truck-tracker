@@ -250,13 +250,15 @@
     var letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     var letterIdx = 0;
     for (var d = 0; d < clusters.length; d++) {
-      var named = null;
+      // NEAREST anchor within range, not the first one listed: a dispatch can
+      // now carry two (pickup + drop-off), and a pit and a site under a
+      // kilometre apart must not both be labelled with whichever came first.
+      var named = null, bestM = Infinity;
       for (var a = 0; a < (anchors || []).length; a++) {
         var an = anchors[a];
         if (an.lat == null || an.lng == null) continue;
-        if (haversine(parseFloat(an.lat), parseFloat(an.lng), clusters[d].lat, clusters[d].lng) <= o.anchorMatchM) {
-          named = an.label; break;
-        }
+        var m = haversine(parseFloat(an.lat), parseFloat(an.lng), clusters[d].lat, clusters[d].lng);
+        if (m <= o.anchorMatchM && m < bestM) { named = an.label; bestM = m; }
       }
       clusters[d].label = named || ('Stop ' + (letters[letterIdx++] || ('#' + (d + 1))));
       clusters[d].named = !!named;
