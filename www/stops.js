@@ -88,12 +88,16 @@
 
   // The two places TruckLegs.roundTrips() classifies the trail against.
   // pickup is null on a single-stop job (roundTrips may then infer one).
-  function tripStops(d, dropoffLabel) {
+  // lat/lng may be null (no pin): called-in loads still build the table.
+  function tripStops(d, dropoffLabel, events) {
+    var dl = (!/^-?\d+(\.\d+)?$/.test(dropoffLabel || '') && dropoffLabel) || 'Drop-off';
     return {
-      pickup: hasPickup(d) && hasCoords(d.pickup_lat, d.pickup_lng)
-        ? { lat: d.pickup_lat, lng: d.pickup_lng, label: pickupLabel(d) } : null,
-      dropoff: d && hasCoords(d.lat, d.lng)
-        ? { lat: d.lat, lng: d.lng, label: (!/^-?\d+(\.\d+)?$/.test(dropoffLabel || '') && dropoffLabel) || 'Drop-off' } : null
+      pickup: hasPickup(d)
+        ? { lat: hasCoords(d.pickup_lat, d.pickup_lng) ? d.pickup_lat : null,
+            lng: hasCoords(d.pickup_lat, d.pickup_lng) ? d.pickup_lng : null, label: pickupLabel(d) } : null,
+      dropoff: d ? { lat: hasCoords(d.lat, d.lng) ? d.lat : null, lng: hasCoords(d.lat, d.lng) ? d.lng : null, label: dl } : null,
+      events: events || [],
+      job: d || null
     };
   }
 

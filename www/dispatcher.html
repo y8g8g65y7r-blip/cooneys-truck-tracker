@@ -536,6 +536,40 @@
 
     .legs-note { font-size: 11.5px; color: #9aa0a6; margin-top: 10px; }
 
+    /* Called-in loads (0012) */
+    .loads-panel:empty { display: none; }
+    .loads-panel { margin-top: 14px; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 12px 10px; background: #fbfcfd; }
+    .loads-head { display: flex; justify-content: space-between; align-items: baseline; }
+    .loads-head .t { font-size: 11px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: #15161a; }
+    .loads-head .c { font-size: 12px; color: #6c757d; font-weight: 600; }
+    .loads-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .btn-log { flex: 1; border-radius: 10px; padding: 11px 10px; font-size: 14px; font-weight: 800; cursor: pointer; font-family: inherit; }
+    .btn-log.loaded { background: #fff7ed; border: 1.5px solid #d97706; color: #92400e; }
+    .btn-log.dumped { background: #eef4ff; border: 1.5px solid var(--brand-blue); color: var(--brand-blue); }
+    .load-form { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; list-style: none; }
+    .load-form .lf-row { display: flex; gap: 8px; }
+    .load-form select, .load-form input { border: 1.5px solid #e5e7eb; border-radius: 8px; padding: 9px 10px; font-size: 15px; font-family: inherit; background: #fff; min-width: 0; }
+    .load-form select { flex: 1; font-weight: 700; }
+    .load-form input[type="time"] { flex: 1; font-variant-numeric: tabular-nums; }
+    .load-form input:focus, .load-form select:focus { border-color: var(--brand-blue); outline: none; }
+    .lf-cancel { flex: 0 0 auto; background: #f4f5f7; border: none; border-radius: 8px; padding: 10px 14px; font-weight: 800; cursor: pointer; font-family: inherit; }
+    .lf-save { flex: 1; background: var(--brand-blue); color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-weight: 800; font-size: 14px; cursor: pointer; font-family: inherit; }
+    .lf-save:disabled { opacity: 0.5; }
+    .loads-list { list-style: none; margin: 10px 0 0; padding: 0; }
+    .load-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 8px 0; border-top: 1px solid #f1f3f5; font-size: 12.5px; }
+    .load-row .k { font-weight: 800; font-size: 11px; letter-spacing: 0.4px; text-transform: uppercase; padding: 2px 7px; border-radius: 6px; }
+    .load-row .k.loaded { background: #fff7ed; color: #92400e; }
+    .load-row .k.dumped { background: #eef4ff; color: var(--brand-blue); }
+    .load-row .tm { font-weight: 800; color: #15161a; font-variant-numeric: tabular-nums; }
+    .load-row .nt { flex: 1; min-width: 0; color: #6c757d; overflow-wrap: anywhere; }
+    .load-row.sys .nt { font-style: italic; }
+    .load-row .acts { display: flex; gap: 10px; margin-left: auto; }
+    .load-row .acts button { background: none; border: none; padding: 2px 0; font-size: 12px; font-weight: 700; color: var(--brand-blue); cursor: pointer; text-decoration: underline; font-family: inherit; }
+    .load-row .acts button.del { color: #b91c1c; }
+    .loads-hint { font-size: 11.5px; color: #9aa0a6; margin-top: 8px; line-height: 1.4; }
+    .loads-err { font-size: 12px; color: #ef4444; margin-top: 8px; }
+    .trip-table tr.trip-note .call { color: #15803d; font-weight: 700; }
+
     /* Round trips: Load -> Loaded -> Dump -> Empty per cycle */
     .trips { margin: 14px 0 16px; }
     .trips-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
@@ -545,6 +579,7 @@
     .trips-stats b { color: #15161a; font-weight: 800; font-variant-numeric: tabular-nums; }
     .trip-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; font-variant-numeric: tabular-nums; table-layout: fixed; }
     .trip-table th, .trip-table td { padding: 7px 2px; text-align: right; white-space: nowrap; }
+    .trip-table td .sub { display: block; font-size: 9.5px; font-weight: 600; color: #9aa0a6; }
     .trip-table thead th { font-size: 10px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: #9aa0a6; border-bottom: 1.5px solid #e5e7eb; }
     .trip-table th:first-child, .trip-table td:first-child { text-align: left; width: 17%; }
     .trip-table tbody th { font-weight: 800; color: #15161a; }
@@ -816,6 +851,7 @@
       <img class="modal-photo" id="modalPhoto" alt="Photo the driver attached when completing this job">
       <div id="modalTicket"></div>
       <div class="modal-timeline" id="modalTimeline"></div>
+      <div class="loads-panel" id="modalLoads"></div>
       <div class="scope-row" id="modalScope">
         <button class="scope-btn active" data-scope="job">This job</button>
         <button class="scope-btn" data-scope="day">Whole day</button>
@@ -882,6 +918,9 @@
     let detailMap = null
     let detailLayers = null
     let openJobId = null
+    // Called-in loads (0012) for the job open in the detail modal, plus what
+    // the round-trip table needs to re-render without refetching the trail.
+    let detailLoads = { id: null, events: [], names: {}, seg: null, truncated: false, editing: null, formKind: null }
     let openScope = 'job'
     let detailSeq = 0
     // Leaflet paints polyline colour as an SVG presentation attribute, where
@@ -916,6 +955,7 @@
     let unreadMessagePanels = new Set()
     let messagesById = {}
     let messagesChannel = null
+    let loadEventsChannel = null
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -944,6 +984,13 @@
           // the rest of the day into a hidden full-table query.
           if (historyVisible) loadHistory()
           else historyLoaded = false
+        })
+        .subscribe()
+
+      loadEventsChannel = sb.channel('dispatch-load-events-all')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_load_events' }, (payload) => {
+          const id = (payload.new && payload.new.dispatch_id) || (payload.old && payload.old.dispatch_id)
+          if (detailLoads.id && (!id || id === detailLoads.id)) fetchLoadEvents(detailLoads.id)
         })
         .subscribe()
 
@@ -1297,6 +1344,10 @@
         to = new Date(d.completed_at || Date.now()).toISOString()
       }
 
+      detailLoads = { id: d.id, events: [], names: {}, seg: null, truncated: false, editing: null, formKind: null }
+      renderLoadsPanel()
+      const eventsP = fetchLoadEvents(d.id, seq)
+
       let pings, truncated
       try {
         const res = await TruckLegs.fetchPings(sb, d.driver_id, from, to)
@@ -1310,9 +1361,14 @@
       // A slower earlier open must never paint over a newer one.
       if (seq !== detailSeq) return
 
+      await eventsP
+      if (seq !== detailSeq) return
+
       if (!pings || pings.length === 0) {
         emptyEl.style.display = 'block'
-        legsEl.innerHTML = ''
+        detailLoads.seg = TruckLegs.segment([])
+        detailLoads.truncated = false
+        renderDetailTrips()
         return
       }
 
@@ -1320,15 +1376,177 @@
       // "Burnco -> 123 Main St, 123 Main St -> Burnco" in the leg list.
       const anchors = DispatchStops.anchors(d, shortAddress(d.site_address))
       const r = TruckLegs.segment(pings, { anchors })
-      // Round trips (pickup -> drop-off cycles) above the raw leg list. null
-      // when there is no drop-off pin, or a single-stop job is not a shuttle:
-      // then the leg list alone shows, exactly as before.
-      const trips = TruckLegs.roundTrips(r, DispatchStops.tripStops(d, shortAddress(d.site_address)))
-
-      legsEl.innerHTML = TruckLegs.tripTableHtml(trips, escapeHtml) + renderLegs(r, truncated)
+      detailLoads.seg = r
+      detailLoads.truncated = truncated
+      renderDetailTrips()
       drawRoute(r)
       loadIdleBanner(d.driver_id, seq)
     }
+
+    // Round trips (pickup -> drop-off cycles) above the raw leg list. Called-in
+    // loads are authoritative; GPS fills the rest. null (nothing shown) when
+    // there is no drop-off pin, a single-stop job is not a shuttle, and nothing
+    // was called in: then the leg list alone shows, exactly as before.
+    function renderDetailTrips() {
+      const d = jobById[detailLoads.id]
+      const legsEl = document.getElementById('modalLegs')
+      if (!d || !detailLoads.seg) return
+      const r = detailLoads.seg
+      const trips = TruckLegs.roundTrips(r, DispatchStops.tripStops(d, shortAddress(d.site_address), detailLoads.events))
+      const legs = r.points.length ? renderLegs(r, detailLoads.truncated) : ''
+      legsEl.innerHTML = TruckLegs.tripTableHtml(trips, escapeHtml) + legs
+    }
+
+    // --- Called-in loads (dispatch_load_events, 0012) --------------------------
+    // "He told me he dumped and loaded again": the office logs it here. No driver
+    // tap involved. Editable while the job is open and on the day it closed.
+    function loadsEditable(d) {
+      if (!d) return false
+      if (d.status === 'active') return true
+      if (d.status !== 'completed' || !d.completed_at) return false
+      return new Date(d.completed_at).toDateString() === new Date().toDateString()
+    }
+
+    async function fetchLoadEvents(dispatchId, seq) {
+      const { data, error } = await sb.from('dispatch_load_events')
+        .select('id, kind, event_at, note, source, entered_by, updated_at, updated_by')
+        .eq('dispatch_id', dispatchId)
+        .order('event_at', { ascending: true })
+      if (seq != null && seq !== detailSeq) return
+      if (detailLoads.id !== dispatchId) return
+      if (error) { console.error('Load events fetch failed', error); detailLoads.error = true; renderLoadsPanel(); return }
+      detailLoads.error = false
+      detailLoads.events = data || []
+      const ids = [...new Set(detailLoads.events.flatMap(e => [e.entered_by, e.updated_by]).filter(Boolean))]
+        .filter(x => !detailLoads.names[x])
+      if (ids.length) {
+        const { data: ppl } = await sb.from('profiles').select('id, full_name').in('id', ids)
+        ;(ppl || []).forEach(p => { detailLoads.names[p.id] = p.full_name })
+      }
+      renderLoadsPanel()
+      if (detailLoads.seg) renderDetailTrips()
+    }
+
+    function hhmm(ms) {
+      const t = new Date(ms)
+      return String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0')
+    }
+
+    // "10:52" typed today -> a timestamp. A time more than 5 minutes ahead of
+    // now means the call came in after midnight about yesterday evening.
+    function timeToIso(hm, baseMs) {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(hm || '')
+      if (!m) return null
+      const t = new Date(baseMs || Date.now())
+      t.setHours(+m[1], +m[2], 0, 0)
+      if (!baseMs && t.getTime() > Date.now() + 5 * 60000) t.setDate(t.getDate() - 1)
+      return t.toISOString()
+    }
+
+    function renderLoadsPanel() {
+      const el = document.getElementById('modalLoads')
+      const d = jobById[detailLoads.id]
+      if (!d) { el.innerHTML = ''; return }
+      const editable = loadsEditable(d)
+      const evs = detailLoads.events
+      if (!editable && !evs.length && !d.picked_up_at) { el.innerHTML = ''; return }
+      const who = id => escapeHtml(detailLoads.names[id] || 'dispatch')
+      const rows = []
+      if (d.picked_up_at && DispatchStops.hasPickup(d)) {
+        rows.push(`<li class="load-row sys"><span class="k loaded">Loaded</span><span class="tm">${hhmm(new Date(d.picked_up_at).getTime())}</span>
+          <span class="nt">First load · ${escapeHtml(DispatchStops.sourceText(d.pickup_source) || 'marked loaded')}</span></li>`)
+      }
+      evs.forEach(e => {
+        const isEdit = detailLoads.editing === e.id
+        if (isEdit) { rows.push(loadFormHtml(e.kind, e)); return }
+        rows.push(`<li class="load-row"><span class="k ${e.kind}">${e.kind === 'dumped' ? 'Dumped' : 'Loaded'}</span>
+          <span class="tm">${hhmm(new Date(e.event_at).getTime())}</span>
+          <span class="nt">${e.note ? escapeHtml(e.note) + ' · ' : ''}by ${who(e.entered_by)}${e.updated_at ? ' · edited by ' + who(e.updated_by) : ''}</span>
+          ${editable ? `<span class="acts"><button type="button" data-load-edit="${escapeHtml(e.id)}">Edit</button><button type="button" class="del" data-load-del="${escapeHtml(e.id)}">Delete</button></span>` : ''}</li>`)
+      })
+      const form = detailLoads.formKind && !detailLoads.editing ? loadFormHtml(detailLoads.formKind, null) : ''
+      el.innerHTML = `
+        <div class="loads-head"><span class="t">Loads called in</span><span class="c">${evs.length ? evs.length + ' logged' : 'none logged yet'}</span></div>
+        ${editable ? `<div class="loads-actions">
+          <button type="button" class="btn-log loaded" data-load-new="loaded">+ Loaded</button>
+          <button type="button" class="btn-log dumped" data-load-new="dumped">+ Dumped</button>
+        </div>` : ''}
+        ${form}
+        ${rows.length ? `<ul class="loads-list">${rows.join('')}</ul>` : ''}
+        ${detailLoads.error ? '<div class="loads-err">Could not load the logged loads. Close and reopen to retry.</div>' : ''}
+        ${editable ? '<div class="loads-hint">When the driver calls in a dump or a reload, log it here. Time defaults to now; change it if the call came late.</div>' : ''}`
+      const first = el.querySelector('.load-form input[type="time"]')
+      if (first && !first.dataset.focused) { first.dataset.focused = '1'; first.focus() }
+    }
+
+    function loadFormHtml(kind, ev) {
+      const t = ev ? hhmm(new Date(ev.event_at).getTime()) : hhmm(Date.now())
+      return `<form class="load-form" data-load-form="${ev ? escapeHtml(ev.id) : ''}">
+        <div class="lf-row">
+          <select name="kind" aria-label="Loaded or dumped">
+            <option value="loaded"${kind === 'loaded' ? ' selected' : ''}>Loaded</option>
+            <option value="dumped"${kind === 'dumped' ? ' selected' : ''}>Dumped</option>
+          </select>
+          <input type="time" name="time" value="${t}" required aria-label="Time">
+        </div>
+        <input type="text" name="note" maxlength="300" placeholder="Note (tonnage, scale ticket #) - optional" value="${ev && ev.note ? escapeHtml(ev.note) : ''}">
+        <div class="lf-row">
+          <button type="button" class="lf-cancel" data-load-cancel="1">Cancel</button>
+          <button type="submit" class="lf-save">${ev ? 'Save changes' : 'Log it'}</button>
+        </div>
+      </form>`
+    }
+
+    document.getElementById('modalLoads').addEventListener('click', async (e) => {
+      const nb = e.target.closest('[data-load-new]')
+      if (nb) { detailLoads.formKind = nb.dataset.loadNew; detailLoads.editing = null; renderLoadsPanel(); return }
+      const eb = e.target.closest('[data-load-edit]')
+      if (eb) { detailLoads.editing = eb.dataset.loadEdit; detailLoads.formKind = null; renderLoadsPanel(); return }
+      if (e.target.closest('[data-load-cancel]')) { detailLoads.editing = null; detailLoads.formKind = null; renderLoadsPanel(); return }
+      const db = e.target.closest('[data-load-del]')
+      if (db) {
+        const ev = detailLoads.events.find(x => x.id === db.dataset.loadDel)
+        if (!ev || !confirm(`Delete the ${ev.kind} logged at ${hhmm(new Date(ev.event_at).getTime())}?`)) return
+        db.disabled = true
+        const { error } = await sb.from('dispatch_load_events').delete().eq('id', ev.id)
+        if (error) { db.disabled = false; alert('Could not delete: ' + error.message); return }
+        fetchLoadEvents(detailLoads.id)
+      }
+    })
+
+    document.getElementById('modalLoads').addEventListener('submit', async (e) => {
+      const form = e.target.closest('form[data-load-form]')
+      if (!form) return
+      e.preventDefault()
+      const d = jobById[detailLoads.id]
+      if (!d) return
+      const editId = form.dataset.loadForm
+      const ev = editId ? detailLoads.events.find(x => x.id === editId) : null
+      const kind = form.kind.value
+      // Editing keeps the event's own day; a new entry is today.
+      const iso = timeToIso(form.time.value, ev ? new Date(ev.event_at).getTime() : null)
+      if (!iso) { alert('Enter a time, e.g. 10:52'); return }
+      if (new Date(iso).getTime() > Date.now() + 5 * 60000) { alert('That time is in the future.'); return }
+      const note = form.note.value.trim() || null
+      const btn = form.querySelector('.lf-save')
+      btn.disabled = true
+      btn.textContent = 'Saving...'
+      const res = ev
+        ? await sb.from('dispatch_load_events').update({ kind, event_at: iso, note }).eq('id', ev.id)
+        : await sb.from('dispatch_load_events').insert({ dispatch_id: d.id, kind, event_at: iso, note })
+      if (res.error) { btn.disabled = false; btn.textContent = ev ? 'Save changes' : 'Log it'; alert('Could not save: ' + res.error.message); return }
+      // The first "loaded" on a two-stop job also moves the job to "to drop-off",
+      // exactly like the Mark-loaded button, so the driver's directions switch.
+      if (!ev && kind === 'loaded' && DispatchStops.hasPickup(d) && !d.picked_up_at && d.status === 'active') {
+        const { error: e2 } = await sb.from('dispatches').update({ picked_up_at: iso, pickup_source: 'dispatch' })
+          .eq('id', d.id).is('picked_up_at', null)
+        if (!e2) { d.picked_up_at = iso; d.pickup_source = 'dispatch'; loadActiveDispatches() }
+      }
+      detailLoads.editing = null
+      detailLoads.formKind = null
+      await fetchLoadEvents(d.id)
+      if (openJobId === d.id && !ev && kind === 'loaded' && d.picked_up_at === iso) openJobDetail(d.id, openScope)
+    })
 
     // --- Completion photo ----------------------------------------------------
     // The bucket is private (a photo can show a client's site, a plate, or a
