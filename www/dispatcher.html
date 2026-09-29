@@ -1461,7 +1461,7 @@
         if (isEdit) { rows.push(loadFormHtml(e.kind, e)); return }
         rows.push(`<li class="load-row"><span class="k ${e.kind}">${e.kind === 'dumped' ? 'Dumped' : 'Loaded'}</span>
           <span class="tm">${hhmm(new Date(e.event_at).getTime())}</span>
-          <span class="nt">${e.note ? escapeHtml(e.note) + ' · ' : ''}by ${who(e.entered_by)}${e.updated_at ? ' · edited by ' + who(e.updated_by) : ''}</span>
+          <span class="nt">${e.note ? escapeHtml(e.note) + ' · ' : ''}${e.source === 'geofence' ? 'from GPS' : 'by ' + who(e.entered_by)}${e.updated_at ? ' · edited by ' + who(e.updated_by) : ''}</span>
           ${editable ? `<span class="acts"><button type="button" data-load-edit="${escapeHtml(e.id)}">Edit</button><button type="button" class="del" data-load-del="${escapeHtml(e.id)}">Delete</button></span>` : ''}</li>`)
       })
       const form = detailLoads.formKind && !detailLoads.editing ? loadFormHtml(detailLoads.formKind, null) : ''

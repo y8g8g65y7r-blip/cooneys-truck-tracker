@@ -533,7 +533,8 @@
     (events || []).forEach(function (e) {
       var t = new Date(e.event_at).getTime();
       if (!isFinite(t)) return;
-      out.push({ type: e.kind === 'dumped' ? 'Dleave' : 'Pleave', t: t, src: 'phone', eventId: e.id, note: e.note || null });
+      // source 'geofence' = logged from the GPS trail (e.g. a backfill), not a phone call.
+      out.push({ type: e.kind === 'dumped' ? 'Dleave' : 'Pleave', t: t, src: e.source === 'geofence' ? 'gpslog' : 'phone', eventId: e.id, note: e.note || null });
     });
     // The job's own "Loaded" (driver tap or office button) is the first load.
     // A geofence stamp is GPS-derived already, so it adds nothing.
@@ -698,7 +699,7 @@
     var notes = [];
     var sawP = visits.some(function (x) { return x.key === 'P'; });
     var sawD = visits.some(function (x) { return x.key === 'D'; });
-    if (mode === 'dispatch' && pick.lat != null && !sawP && pts.length) notes.push('The truck never stopped within ' + o.enterM + ' m of the pickup pin, so pickup times come only from called-in loads. If it loaded somewhere else, the pickup pin is probably wrong.');
+    if (mode === 'dispatch' && pick.lat != null && !sawP && pts.length) notes.push('The truck never stopped within ' + o.enterM + ' m of the pickup pin, so pickup times come only from logged loads. If it loaded somewhere else, the pickup pin is probably wrong.');
     if (drop.lat != null && !sawD && pts.length) notes.push('The truck never stopped within ' + o.enterM + ' m of the drop-off pin.');
     return { mode: mode, pickup: pick, dropoff: drop, firstLoad: first, trips: out, summary: summary, notes: notes };
   }
@@ -758,8 +759,8 @@
         mid + tail + '<td class="tot">' + cyc + '</td></tr>';
       var notes = [];
       if (t.called.length) {
-        notes.push('<span class="call">Called in: ' + t.called.map(function (c) {
-          return c.kind + ' ' + fmtClock(c.at) + (c.src === 'tap' ? ' (driver tap)' : '') + (c.note ? ' · ' + esc(c.note) : '');
+        notes.push('<span class="call">Logged: ' + t.called.map(function (c) {
+          return c.kind + ' ' + fmtClock(c.at) + (c.src === 'tap' ? ' (driver tap)' : c.src === 'gpslog' ? ' (from GPS)' : ' (called in)') + (c.note ? ' · ' + esc(c.note) : '');
         }).join(', ') + '</span>');
       }
       if (t.startedMidTrip) notes.push('Trail starts after this load left the pickup.');
@@ -793,7 +794,7 @@
     if (used.open) key.push('"≥" = the trail starts or ends during that stay, so it was at least that long');
     if (used.hole) key.push('"?" = the stay includes a stretch with no GPS');
     if (key.length) notesOut.push(key.join('; ') + '. Those cells are left out of the averages and totals.');
-    notesOut.push('Cycle = left the pickup loaded to left it loaded again. Called-in times replace GPS; everything else is GPS.');
+    notesOut.push('Cycle = left the pickup loaded to left it loaded again. Logged times replace GPS; everything else is GPS.');
     return '<div class="trips">' + head +
       '<table class="trip-table"><thead><tr><th scope="col">Trip</th><th scope="col">Loaded</th><th scope="col">Dump</th>' +
       '<th scope="col">Empty</th><th scope="col">Load</th><th scope="col">Cycle</th></tr></thead><tbody>' + rows +

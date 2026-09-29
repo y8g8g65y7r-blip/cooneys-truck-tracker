@@ -1581,7 +1581,7 @@
         const anchors = DispatchStops.anchors(d, 'Site')
         const seg = TruckLegs.segment(rows, { anchors })
         const { data: evs } = await sb.from('dispatch_load_events')
-          .select('id, kind, event_at, note').eq('dispatch_id', d.id).order('event_at', { ascending: true })
+          .select('id, kind, event_at, note, source').eq('dispatch_id', d.id).order('event_at', { ascending: true })
         const trips = TruckLegs.roundTrips(seg, DispatchStops.tripStops(d, 'Site', evs || []))
         body.innerHTML = TruckLegs.tripTableHtml(trips, escapeHtml) + renderLegs(seg)
         body.dataset.loaded = '1'
