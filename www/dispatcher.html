@@ -1579,6 +1579,7 @@
     }
     const geoSuggestions = { site: [], pickup: [] }
     const geoSeq = { site: 0, pickup: 0 }
+    const geoManual = { site: false, pickup: false }   // pin placed by hand, not derived from the text
 
     function geoEl(kind, key) { return document.getElementById(GEO_ROWS[kind][key]) }
 
@@ -1613,6 +1614,15 @@
       const btn = geoEl(kind, 'btn')
       clearGeoRow(kind)
       row.set(null)
+      geoManual[kind] = false
+      const typedCoords = AddressLookup.parseCoords(address)
+      if (typedCoords) {
+        geoSeq[kind]++
+        row.set(typedCoords)
+        geoManual[kind] = true
+        showGeoFound(kind, 'Using the coordinates typed: ' + typedCoords.lat.toFixed(5) + ', ' + typedCoords.lng.toFixed(5), '')
+        return
+      }
       const seq = ++geoSeq[kind]
       btn.disabled = true
       btn.textContent = '...'
@@ -1657,6 +1667,7 @@
       if (!h) return
       if (h.precision === 'address') {
         GEO_ROWS[kind].set({ lat: h.lat, lng: h.lng })
+        geoManual[kind] = false
         clearGeoRow(kind)
         showGeoFound(kind, 'Picked: ' + h.label, h.source)
       } else {
@@ -1744,8 +1755,11 @@
       btn.disabled = false
       btn.textContent = 'Find 📍'
       GEO_ROWS[pinKind].set({ lat: ll.lat, lng: ll.lng })
+      geoManual[pinKind] = true
       clearGeoRow(pinKind)
-      showGeoFound(pinKind, 'Pin placed on the map: ' + ll.lat.toFixed(5) + ', ' + ll.lng.toFixed(5), '')
+      const hasText = geoEl(pinKind, 'input').value.trim() !== ''
+      showGeoFound(pinKind, 'Pin placed on the map: ' + ll.lat.toFixed(5) + ', ' + ll.lng.toFixed(5) +
+        (hasText ? '' : '. Add a short description in the address box if you like; the pin stays.'), '')
       closePinPicker()
     }
 
@@ -1767,6 +1781,7 @@
         document.getElementById('pickupName').value = ''
         document.getElementById('pickupAddress').value = ''
         clearGeoRow('pickup')
+        geoManual.pickup = false
         pickupLat = null
         pickupLng = null
       }
@@ -1775,6 +1790,7 @@
     // Editing the pickup address after Find invalidates the pin; otherwise
     // the driver is routed to wherever the OLD text geocoded to.
     document.getElementById('pickupAddress').addEventListener('input', () => {
+      if (geoManual.pickup) return            // hand-placed pin: the text is only a label
       pickupLat = null
       pickupLng = null
       geoSeq.pickup++
@@ -1783,6 +1799,7 @@
     // Same rule for the drop-off (was missing): an edited address must not
     // keep the pin from the previous Find.
     document.getElementById('siteAddress').addEventListener('input', () => {
+      if (geoManual.site) return              // hand-placed pin: the text is only a label
       geocodedLat = null
       geocodedLng = null
       geoSeq.site++
@@ -1794,6 +1811,7 @@
       const hit = recentPickups[e.target.value.trim().toLowerCase()]
       if (!hit) return
       document.getElementById('pickupAddress').value = hit.address
+      geoManual.pickup = false
       clearGeoRow('pickup')
       pickupLat = hit.lat
       pickupLng = hit.lng
@@ -1829,17 +1847,20 @@
 
     async function submitDispatch() {
       const driverId = document.getElementById('driverSelect').value
-      const address = document.getElementById('siteAddress').value.trim()
+      const pinLabel = (lat, lng) => (lat != null && lng != null) ? 'Pin ' + Number(lat).toFixed(5) + ', ' + Number(lng).toFixed(5) : ''
+      // A dropped pin with no typed address is a real stop (unaddressed pit,
+      // field access): label it with its coordinates rather than refusing it.
+      const address = document.getElementById('siteAddress').value.trim() || pinLabel(geocodedLat, geocodedLng)
       const notes = document.getElementById('notes').value.trim()
       const pickupName = pickupOpen ? document.getElementById('pickupName').value.trim() : ''
-      const pickupAddress = pickupOpen ? document.getElementById('pickupAddress').value.trim() : ''
+      const pickupAddress = pickupOpen ? (document.getElementById('pickupAddress').value.trim() || pinLabel(pickupLat, pickupLng)) : ''
 
       if (!driverId || !address) {
-        alert('Please select a driver and enter a site address.')
+        alert('Please select a driver and enter a drop-off address or place its pin on the map.')
         return
       }
       if (pickupOpen && !pickupAddress) {
-        alert('Enter the pickup address, or tap "Remove pickup" to send a single-stop dispatch.')
+        alert('Enter the pickup address or place its pin on the map, or tap "Remove pickup" to send a single-stop dispatch.')
         return
       }
 
@@ -1915,6 +1936,7 @@
         document.getElementById('siteAddress').value = ''
         document.getElementById('notes').value = ''
         clearGeoRow('site')
+        geoManual.site = false
         geocodedLat = null
         geocodedLng = null
         setPickupOpen(false)
