@@ -109,6 +109,54 @@
     .btn-geocode:disabled { opacity: 0.4; cursor: not-allowed; }
     .geocode-result { font-size: 12px; color: #22c55e; margin-top: 6px; display: none; }
     .geocode-error { font-size: 12px; color: #ef4444; margin-top: 6px; display: none; }
+    .geocode-result .src { color: #6c757d; font-weight: 600; }
+    .geo-actions { margin-top: 4px; }
+    .geo-link {
+      background: none; border: none; padding: 6px 0; cursor: pointer; font-family: inherit;
+      color: var(--brand-blue); font-size: 12.5px; font-weight: 700; text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    /* Near-misses. Never auto-picked: a pin is where a loaded truck is sent. */
+    .geocode-suggest {
+      display: none; margin-top: 8px; padding: 10px 12px 12px;
+      background: #fffaf0; border: 1px solid #f3dcae; border-radius: 12px;
+    }
+    .geocode-suggest.show { display: block; }
+    .geocode-suggest .h { font-size: 12px; font-weight: 800; color: #92400e; line-height: 1.4; }
+    .sugg {
+      display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
+      background: #fff; border: 1px solid #e8e2d4; border-radius: 10px; padding: 9px 11px;
+      margin-top: 7px; cursor: pointer; font-family: inherit;
+    }
+    .sugg:active { background: #f7f3ea; }
+    .sugg .body { flex: 1; min-width: 0; }
+    .sugg .l { font-size: 12.5px; font-weight: 700; color: #15161a; overflow-wrap: anywhere; }
+    .sugg .n { font-size: 11.5px; font-weight: 600; color: #b45309; margin-top: 2px; }
+    .sugg.other .n { color: #b91c1c; }
+    .sugg .go { font-size: 11.5px; font-weight: 800; color: var(--brand-blue); white-space: nowrap; }
+
+    /* Pin picker */
+    .modal-card.pin-card { max-width: 680px; padding-bottom: 20px; }
+    .pin-sub { font-size: 12.5px; color: #6c757d; margin-top: 4px; line-height: 1.45; }
+    #pinMap { height: 50vh; min-height: 280px; border-radius: 12px; margin-top: 12px; background: #e9edf2; }
+    .pin-bar { display: flex; gap: 8px; margin-top: 10px; }
+    .pin-bar input {
+      flex: 1; min-width: 0; border: 1.5px solid #e5e7eb; border-radius: 10px; padding: 10px 12px;
+      font-size: 14px; font-family: inherit; outline: none;
+    }
+    .pin-bar input:focus { border-color: var(--brand-blue); }
+    .pin-readout { font-size: 12.5px; color: #6c757d; margin-top: 8px; font-variant-numeric: tabular-nums; min-height: 17px; }
+    .pin-readout.err { color: #ef4444; }
+    .pin-actions { display: flex; gap: 8px; margin-top: 12px; }
+    .pin-actions .btn-submit { padding: 15px; font-size: 15px; }
+    .btn-ghost {
+      background: #f4f5f7; color: #15161a; border: none; border-radius: 12px; padding: 0 18px;
+      font-size: 14px; font-weight: 800; cursor: pointer; font-family: inherit;
+    }
+    .pin-drop {
+      width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+      background: #d97706; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+    }
 
     .btn-submit {
       width: 100%;
@@ -689,6 +737,8 @@
           </div>
           <div class="geocode-result" id="pickupGeocodeResult"></div>
           <div class="geocode-error" id="pickupGeocodeError"></div>
+          <div class="geocode-suggest" id="pickupGeocodeSuggest"></div>
+          <div class="geo-actions"><button type="button" class="geo-link" onclick="openPinPicker('pickup')">Place or adjust the pickup pin on the map</button></div>
           <div class="field-hint">Press Find so the map can pin it and the job can move on by itself when the truck leaves the pickup.</div>
         </div>
       </div>
@@ -701,6 +751,8 @@
         </div>
         <div class="geocode-result" id="geocodeResult"></div>
         <div class="geocode-error" id="geocodeError"></div>
+        <div class="geocode-suggest" id="geocodeSuggest"></div>
+        <div class="geo-actions"><button type="button" class="geo-link" onclick="openPinPicker('site')">Place or adjust the pin on the map</button></div>
       </div>
 
       <div class="field">
@@ -747,12 +799,31 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="pinModal" onclick="if(event.target===this) closePinPicker()">
+    <div class="modal-card pin-card">
+      <button class="modal-close" onclick="closePinPicker()">✕</button>
+      <div class="modal-title" id="pinTitle">Place the pin</div>
+      <div class="pin-sub">Tap the map where the truck should go, then drag to fine-tune. Switch to Satellite for new streets and pits the street map does not show yet.</div>
+      <div id="pinMap"></div>
+      <div class="pin-bar">
+        <input type="text" id="pinCoords" inputmode="decimal" placeholder="Or paste coordinates, e.g. 51.03097, -114.25196" autocomplete="off">
+        <button type="button" class="btn-geocode" onclick="pinGoToCoords()">Go</button>
+      </div>
+      <div class="pin-readout" id="pinReadout">No pin yet. Tap the map.</div>
+      <div class="pin-actions">
+        <button type="button" class="btn-ghost" onclick="closePinPicker()">Cancel</button>
+        <button type="button" class="btn-submit" id="pinUseBtn" onclick="confirmPin()" disabled>Use this pin</button>
+      </div>
+    </div>
+  </div>
+
   <div class="lightbox" id="lightbox"><img id="lightboxImg" alt="Job photo, full size"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <script src="legs.js"></script>
   <script src="stops.js"></script>
+  <script src="geocode.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -1489,50 +1560,200 @@
       select.innerHTML = data.map(d => `<option value="${escapeHtml(d.id)}">Unit ${escapeHtml(d.unit_number || '—')} — ${escapeHtml(d.full_name)}</option>`).join('')
     }
 
-    // Nominatim lookup into one address row. Returns {lat,lng} or null.
-    async function geocodeInto(inputId, btnId, resultId, errorId) {
-      const address = document.getElementById(inputId).value.trim()
-      if (!address) return null
-      const btn = document.getElementById(btnId)
-      const resultEl = document.getElementById(resultId)
-      const errorEl = document.getElementById(errorId)
+    // ---- Address lookup (Find) + pin picker ---------------------------------
+    // Lookup order and the "never auto-pick a different street" rule live in
+    // geocode.js. This part is only the two form rows and the map picker.
+    const GEO_ROWS = {
+      site: {
+        input: 'siteAddress', btn: 'geocodeBtn', result: 'geocodeResult', error: 'geocodeError',
+        suggest: 'geocodeSuggest', title: 'Drop-off / site pin',
+        get: () => geocodedLat != null && geocodedLng != null ? { lat: geocodedLat, lng: geocodedLng } : null,
+        set: (p) => { geocodedLat = p ? p.lat : null; geocodedLng = p ? p.lng : null }
+      },
+      pickup: {
+        input: 'pickupAddress', btn: 'pickupGeocodeBtn', result: 'pickupGeocodeResult', error: 'pickupGeocodeError',
+        suggest: 'pickupGeocodeSuggest', title: 'Pickup pin',
+        get: () => pickupLat != null && pickupLng != null ? { lat: pickupLat, lng: pickupLng } : null,
+        set: (p) => { pickupLat = p ? p.lat : null; pickupLng = p ? p.lng : null }
+      }
+    }
+    const geoSuggestions = { site: [], pickup: [] }
+    const geoSeq = { site: 0, pickup: 0 }
+
+    function geoEl(kind, key) { return document.getElementById(GEO_ROWS[kind][key]) }
+
+    function clearGeoRow(kind) {
+      const b = geoEl(kind, 'btn')
+      b.disabled = false
+      b.textContent = 'Find 📍'
+      geoEl(kind, 'result').style.display = 'none'
+      geoEl(kind, 'error').style.display = 'none'
+      const sug = geoEl(kind, 'suggest')
+      sug.classList.remove('show')
+      sug.innerHTML = ''
+      geoSuggestions[kind] = []
+    }
+
+    function showGeoFound(kind, label, source) {
+      const el = geoEl(kind, 'result')
+      el.innerHTML = '✓ ' + escapeHtml(label) + (source ? ' <span class="src">· ' + escapeHtml(source) + '</span>' : '')
+      el.style.display = 'block'
+    }
+
+    function showGeoError(kind, msg) {
+      const el = geoEl(kind, 'error')
+      el.textContent = msg
+      el.style.display = 'block'
+    }
+
+    async function findAddress(kind) {
+      const row = GEO_ROWS[kind]
+      const address = geoEl(kind, 'input').value.trim()
+      if (!address) return
+      const btn = geoEl(kind, 'btn')
+      clearGeoRow(kind)
+      row.set(null)
+      const seq = ++geoSeq[kind]
       btn.disabled = true
       btn.textContent = '...'
-      resultEl.style.display = 'none'
-      errorEl.style.display = 'none'
-      let found = null
-      try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`
-        const res = await fetch(url, { headers: { 'User-Agent': 'CooneysTruckTracker/1.0' } })
-        const data = await res.json()
-        if (data.length > 0) {
-          found = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
-          resultEl.textContent = `✓ Found: ${data[0].display_name}`
-          resultEl.style.display = 'block'
-        } else {
-          errorEl.textContent = 'Address not found. Try a more specific address.'
-          errorEl.style.display = 'block'
-        }
-      } catch (e) {
-        errorEl.textContent = 'Could not look up address. Check your connection.'
-        errorEl.style.display = 'block'
-      }
+      let r
+      try { r = await AddressLookup.lookup(address) } catch (e) { r = { status: 'error' } }
+      if (seq !== geoSeq[kind]) return          // superseded: newer Find, edit or pin owns the row
       btn.disabled = false
       btn.textContent = 'Find 📍'
-      return found
+      if (r.status === 'found') {
+        row.set({ lat: r.best.lat, lng: r.best.lng })
+        showGeoFound(kind, 'Found: ' + r.best.label, r.best.source)
+      } else if (r.status === 'suggest') {
+        showGeoSuggestions(kind, r.suggestions)
+      } else if (r.status === 'none') {
+        showGeoError(kind, 'No match in OpenStreetMap, City of Calgary or Rocky View County records. Place the pin on the map instead.')
+      } else {
+        showGeoError(kind, 'Could not look up the address (check the connection). You can still place the pin on the map.')
+      }
     }
 
-    async function geocodeAddress() {
-      const r = await geocodeInto('siteAddress', 'geocodeBtn', 'geocodeResult', 'geocodeError')
-      geocodedLat = r ? r.lat : null
-      geocodedLng = r ? r.lng : null
+    // Near-misses are shown, never picked for the dispatcher. An exact house
+    // match is one tap; a street-only or different-street hit opens the map
+    // THERE so the exact spot still has to be tapped.
+    function showGeoSuggestions(kind, list) {
+      geoSuggestions[kind] = list
+      const typed = geoEl(kind, 'input').value.trim()
+      const el = geoEl(kind, 'suggest')
+      el.innerHTML = `<div class="h">Could not confirm "${escapeHtml(typed)}". Nothing has been pinned. Closest matches:</div>` +
+        list.map((h, i) => `
+          <button type="button" class="sugg ${h.precision === 'other' ? 'other' : ''}" onclick="useGeoSuggestion('${kind}', ${i})">
+            <span class="body">
+              <span class="l" style="display:block">${escapeHtml(h.label)}</span>
+              <span class="n" style="display:block">${escapeHtml(h.note || h.source)}</span>
+            </span>
+            <span class="go">${h.precision === 'address' ? 'Use this' : 'Pin near here'}</span>
+          </button>`).join('')
+      el.classList.add('show')
     }
 
-    async function geocodePickup() {
-      const r = await geocodeInto('pickupAddress', 'pickupGeocodeBtn', 'pickupGeocodeResult', 'pickupGeocodeError')
-      pickupLat = r ? r.lat : null
-      pickupLng = r ? r.lng : null
+    function useGeoSuggestion(kind, i) {
+      const h = geoSuggestions[kind][i]
+      if (!h) return
+      if (h.precision === 'address') {
+        GEO_ROWS[kind].set({ lat: h.lat, lng: h.lng })
+        clearGeoRow(kind)
+        showGeoFound(kind, 'Picked: ' + h.label, h.source)
+      } else {
+        openPinPicker(kind, { lat: h.lat, lng: h.lng }, false)
+      }
     }
+
+    async function geocodeAddress() { return findAddress('site') }
+    async function geocodePickup() { return findAddress('pickup') }
+
+    // Pin picker. One Leaflet map, reused for both rows.
+    let pinMap = null
+    let pinMarker = null
+    let pinKind = null
+    const PIN_ICON = () => L.divIcon({ className: '', html: '<div class="pin-drop"></div>', iconSize: [26, 26], iconAnchor: [13, 30] })
+
+    function openPinPicker(kind, center, placeAtCenter) {
+      pinKind = kind
+      const current = GEO_ROWS[kind].get()
+      const start = center || current
+      document.getElementById('pinTitle').textContent = GEO_ROWS[kind].title
+      document.getElementById('pinCoords').value = ''
+      document.getElementById('pinModal').classList.add('open')
+      if (!pinMap) {
+        pinMap = L.map('pinMap', { zoomControl: true })
+        const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap', maxZoom: 19
+        })
+        const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          attribution: 'Imagery © Esri, Maxar, Earthstar Geographics', maxZoom: 19
+        })
+        street.addTo(pinMap)
+        L.control.layers({ 'Street': street, 'Satellite': sat }, null, { position: 'topright', collapsed: false }).addTo(pinMap)
+        pinMap.on('click', (e) => placePin(e.latlng))
+      }
+      if (pinMarker) { pinMap.removeLayer(pinMarker); pinMarker = null }
+      updatePinReadout()
+      // The modal was display:none a moment ago; Leaflet needs the real size.
+      setTimeout(() => {
+        pinMap.invalidateSize()
+        if (start) {
+          pinMap.setView([start.lat, start.lng], 17)
+          // An existing pin is shown for adjusting. A suggestion only centres
+          // the map: the dispatcher still has to tap the actual spot.
+          if (!center || placeAtCenter) placePin(L.latLng(start.lat, start.lng))
+        } else {
+          pinMap.setView([51.045, -114.07], 10)
+        }
+      }, 60)
+    }
+
+    function placePin(latlng) {
+      if (!pinMarker) {
+        pinMarker = L.marker(latlng, { draggable: true, icon: PIN_ICON() }).addTo(pinMap)
+        pinMarker.on('dragend', updatePinReadout)
+      } else {
+        pinMarker.setLatLng(latlng)
+      }
+      updatePinReadout()
+    }
+
+    function updatePinReadout(msg) {
+      const el = document.getElementById('pinReadout')
+      const btn = document.getElementById('pinUseBtn')
+      el.classList.toggle('err', typeof msg === 'string')
+      if (typeof msg === 'string') { el.textContent = msg; return }
+      if (!pinMarker) { el.textContent = 'No pin yet. Tap the map.'; btn.disabled = true; return }
+      const ll = pinMarker.getLatLng()
+      el.textContent = 'Pin: ' + ll.lat.toFixed(5) + ', ' + ll.lng.toFixed(5)
+      btn.disabled = false
+    }
+
+    function pinGoToCoords() {
+      const c = AddressLookup.parseCoords(document.getElementById('pinCoords').value)
+      if (!c) { updatePinReadout('Could not read those coordinates. Use "latitude, longitude", e.g. 51.03097, -114.25196'); return }
+      pinMap.setView([c.lat, c.lng], 17)
+      placePin(L.latLng(c.lat, c.lng))
+    }
+
+    function confirmPin() {
+      if (!pinMarker || !pinKind) return
+      const ll = pinMarker.getLatLng()
+      geoSeq[pinKind]++                        // a Find still in flight must not overwrite this
+      const btn = geoEl(pinKind, 'btn')
+      btn.disabled = false
+      btn.textContent = 'Find 📍'
+      GEO_ROWS[pinKind].set({ lat: ll.lat, lng: ll.lng })
+      clearGeoRow(pinKind)
+      showGeoFound(pinKind, 'Pin placed on the map: ' + ll.lat.toFixed(5) + ', ' + ll.lng.toFixed(5), '')
+      closePinPicker()
+    }
+
+    function closePinPicker() {
+      document.getElementById('pinModal').classList.remove('open')
+    }
+
+    document.getElementById('pinCoords').addEventListener('keydown', (e) => { if (e.key === 'Enter') pinGoToCoords() })
 
     function setPickupOpen(open) {
       pickupOpen = open
@@ -1545,8 +1766,7 @@
       } else {
         document.getElementById('pickupName').value = ''
         document.getElementById('pickupAddress').value = ''
-        document.getElementById('pickupGeocodeResult').style.display = 'none'
-        document.getElementById('pickupGeocodeError').style.display = 'none'
+        clearGeoRow('pickup')
         pickupLat = null
         pickupLng = null
       }
@@ -1557,7 +1777,16 @@
     document.getElementById('pickupAddress').addEventListener('input', () => {
       pickupLat = null
       pickupLng = null
-      document.getElementById('pickupGeocodeResult').style.display = 'none'
+      geoSeq.pickup++
+      clearGeoRow('pickup')
+    })
+    // Same rule for the drop-off (was missing): an edited address must not
+    // keep the pin from the previous Find.
+    document.getElementById('siteAddress').addEventListener('input', () => {
+      geocodedLat = null
+      geocodedLng = null
+      geoSeq.site++
+      clearGeoRow('site')
     })
 
     // Picking a recent pickup ("Burnco") fills its address and pin in one go.
@@ -1565,6 +1794,7 @@
       const hit = recentPickups[e.target.value.trim().toLowerCase()]
       if (!hit) return
       document.getElementById('pickupAddress').value = hit.address
+      clearGeoRow('pickup')
       pickupLat = hit.lat
       pickupLng = hit.lng
       const res = document.getElementById('pickupGeocodeResult')
@@ -1684,7 +1914,7 @@
       setTimeout(() => {
         document.getElementById('siteAddress').value = ''
         document.getElementById('notes').value = ''
-        document.getElementById('geocodeResult').style.display = 'none'
+        clearGeoRow('site')
         geocodedLat = null
         geocodedLng = null
         setPickupOpen(false)
