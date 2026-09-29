@@ -388,6 +388,34 @@
     .leg-row .speed { flex-shrink: 0; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; }
     .leg-row.stop .speed { color: rgba(255,255,255,0.45); font-weight: 700; }
 
+    /* Round trips (shared markup from TruckLegs.tripTableHtml), dark card */
+    .trips { margin: 2px 0 14px; }
+    .trips-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .trips-head .t { font-size: 10.5px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: #fff; white-space: nowrap; }
+    .trips-head .route { font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.5); text-align: right; overflow-wrap: anywhere; }
+    .trips-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 5px; font-size: 11.5px; color: rgba(255,255,255,0.5); }
+    .trips-stats b { color: #fff; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .trip-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; font-variant-numeric: tabular-nums; table-layout: fixed; }
+    .trip-table th, .trip-table td { padding: 6px 2px; text-align: right; white-space: nowrap; }
+    .trip-table thead th { font-size: 9.5px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: rgba(255,255,255,0.4); border-bottom: 1px solid rgba(255,255,255,0.12); }
+    .trip-table th:first-child, .trip-table td:first-child { text-align: left; width: 17%; }
+    .trip-table tbody th { font-weight: 800; color: #fff; }
+    .trip-table tbody th .at { display: block; font-size: 9.5px; font-weight: 600; color: rgba(255,255,255,0.35); }
+    .trip-table tbody tr { border-top: 1px solid rgba(255,255,255,0.06); }
+    .trip-table td { font-weight: 700; color: rgba(255,255,255,0.9); }
+    .trip-table td.tot { font-weight: 800; color: #fff; }
+    .trip-table td.na { color: rgba(255,255,255,0.25); }
+    .trip-table td.inc { color: #fbbf24; font-weight: 600; }
+    .trip-table td.now { color: var(--brand-blue-light); font-weight: 800; }
+    .trip-table tr.partial th { color: rgba(255,255,255,0.55); }
+    .trip-table tr.trip-note td { text-align: left; white-space: normal; font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.5); padding: 0 2px 7px; border-top: none; }
+    .trip-table tr.trip-note .flag { color: #fbbf24; font-weight: 700; }
+    .trip-table tfoot tr { border-top: 1px solid rgba(255,255,255,0.14); }
+    .trip-table tfoot th { font-size: 9.5px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: rgba(255,255,255,0.45); }
+    .trip-table tfoot td { color: rgba(255,255,255,0.75); }
+    .trip-table tfoot tr.sum td { color: rgba(255,255,255,0.45); font-weight: 600; }
+    .trips-note { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 6px; line-height: 1.45; }
+
     .btn-directions {
       width: 100%;
       padding: 20px;
@@ -1514,7 +1542,9 @@
         // Pickup + drop-off both named, so a Burnco shuttle reads
         // "Burnco -> Site, Site -> Burnco" instead of lettered stops.
         const anchors = DispatchStops.anchors(d, 'Site')
-        body.innerHTML = renderLegs(TruckLegs.segment(rows, { anchors }))
+        const seg = TruckLegs.segment(rows, { anchors })
+        const trips = TruckLegs.roundTrips(seg, DispatchStops.tripStops(d, 'Site'))
+        body.innerHTML = TruckLegs.tripTableHtml(trips, escapeHtml) + renderLegs(seg)
         body.dataset.loaded = '1'
       } catch (err) {
         console.error('Leg breakdown failed', err)

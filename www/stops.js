@@ -86,6 +86,17 @@
     return out;
   }
 
+  // The two places TruckLegs.roundTrips() classifies the trail against.
+  // pickup is null on a single-stop job (roundTrips may then infer one).
+  function tripStops(d, dropoffLabel) {
+    return {
+      pickup: hasPickup(d) && hasCoords(d.pickup_lat, d.pickup_lng)
+        ? { lat: d.pickup_lat, lng: d.pickup_lng, label: pickupLabel(d) } : null,
+      dropoff: d && hasCoords(d.lat, d.lng)
+        ? { lat: d.lat, lng: d.lng, label: (!/^-?\d+(\.\d+)?$/.test(dropoffLabel || '') && dropoffLabel) || 'Drop-off' } : null
+    };
+  }
+
   // "Burnco -> 1400 84 St SE" for one-line list rows; plain site otherwise.
   function routeText(d) {
     return hasPickup(d) ? pickupLabel(d) + ' → ' + (d.site_address || '') : (d ? d.site_address || '' : '');
@@ -100,7 +111,7 @@
 
   return {
     hasPickup: hasPickup, pickupLabel: pickupLabel, stage: stage, nextStop: nextStop, stopOf: stopOf,
-    directionsUrl: directionsUrl, anchors: anchors, routeText: routeText,
+    directionsUrl: directionsUrl, anchors: anchors, tripStops: tripStops, routeText: routeText,
     shortAddress: shortAddress, sourceText: sourceText
   };
 });

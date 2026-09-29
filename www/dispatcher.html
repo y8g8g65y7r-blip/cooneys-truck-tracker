@@ -536,6 +536,34 @@
 
     .legs-note { font-size: 11.5px; color: #9aa0a6; margin-top: 10px; }
 
+    /* Round trips: Load -> Loaded -> Dump -> Empty per cycle */
+    .trips { margin: 14px 0 16px; }
+    .trips-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .trips-head .t { font-size: 11px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: #15161a; white-space: nowrap; }
+    .trips-head .route { font-size: 12px; font-weight: 600; color: #6c757d; text-align: right; overflow-wrap: anywhere; }
+    .trips-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: 12px; color: #6c757d; }
+    .trips-stats b { color: #15161a; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .trip-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; font-variant-numeric: tabular-nums; table-layout: fixed; }
+    .trip-table th, .trip-table td { padding: 7px 2px; text-align: right; white-space: nowrap; }
+    .trip-table thead th { font-size: 10px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: #9aa0a6; border-bottom: 1.5px solid #e5e7eb; }
+    .trip-table th:first-child, .trip-table td:first-child { text-align: left; width: 17%; }
+    .trip-table tbody th { font-weight: 800; color: #15161a; }
+    .trip-table tbody th .at { display: block; font-size: 10px; font-weight: 600; color: #9aa0a6; }
+    .trip-table tbody tr { border-top: 1px solid #f1f3f5; }
+    .trip-table td { font-weight: 700; color: #15161a; }
+    .trip-table td.tot { font-weight: 800; }
+    .trip-table td.na { color: #c3c8ce; }
+    .trip-table td.inc { color: #b45309; font-weight: 600; }
+    .trip-table td.now { color: var(--brand-blue); font-weight: 800; }
+    .trip-table tr.partial th { color: #6c757d; }
+    .trip-table tr.trip-note td { text-align: left; white-space: normal; font-size: 11.5px; font-weight: 500; color: #6c757d; padding: 0 2px 8px; border-top: none; }
+    .trip-table tr.trip-note .flag { color: #92400e; font-weight: 700; }
+    .trip-table tfoot tr { border-top: 1.5px solid #e5e7eb; }
+    .trip-table tfoot th { font-size: 10px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: #6c757d; }
+    .trip-table tfoot td { color: #3f444b; }
+    .trip-table tfoot tr.sum td { color: #6c757d; font-weight: 600; }
+    .trips-note { font-size: 11.5px; color: #9aa0a6; margin-top: 6px; line-height: 1.45; }
+
     .leg-list { margin-top: 14px; }
     .leg-row {
       display: flex;
@@ -1292,8 +1320,12 @@
       // "Burnco -> 123 Main St, 123 Main St -> Burnco" in the leg list.
       const anchors = DispatchStops.anchors(d, shortAddress(d.site_address))
       const r = TruckLegs.segment(pings, { anchors })
+      // Round trips (pickup -> drop-off cycles) above the raw leg list. null
+      // when there is no drop-off pin, or a single-stop job is not a shuttle:
+      // then the leg list alone shows, exactly as before.
+      const trips = TruckLegs.roundTrips(r, DispatchStops.tripStops(d, shortAddress(d.site_address)))
 
-      legsEl.innerHTML = renderLegs(r, truncated)
+      legsEl.innerHTML = TruckLegs.tripTableHtml(trips, escapeHtml) + renderLegs(r, truncated)
       drawRoute(r)
       loadIdleBanner(d.driver_id, seq)
     }
