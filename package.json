@@ -21,6 +21,8 @@
   "dependencies": {
     "@capacitor-community/background-geolocation": "^1.2.26",
     "@capacitor/android": "^7.6.8",
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/app-launcher": "^7.0.4",
     "@capacitor/camera": "^7.0.5",
     "@capacitor/cli": "^7.6.8",
     "@capacitor/core": "^7.6.8",

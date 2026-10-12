@@ -158,4 +158,18 @@ const iso = ms => new Date(ms).toISOString();
   assert.strictEqual(r.trips[0].called.length, 1, 'one load, not two');
   console.log('ok 11 picked_up_at + event within 15 min count once');
 }
+// 12. Driver taps (0013): a Loaded tap queued in a dead zone syncs 40 min late,
+//     so the stage flag it set carries the SYNC time. The tap is the load; the
+//     flag must not become a second one. Phone-in-only, so no GPS needed.
+{
+  const ev = [['loaded', 0], ['dumped', 60], ['loaded', 120], ['dumped', 180]].map(([k, m], i) => ({ id: 'e' + i, kind: k, event_at: iso(T0 + m * MIN), source: 'driver' }));
+  const job = { picked_up_at: iso(T0 + 40 * MIN), pickup_source: 'tap' };
+  const r = L.roundTrips(L.segment([]), { pickup: { label: 'Pit' }, dropoff: { label: 'Site' }, events: ev, job });
+  assert.strictEqual(r.summary.loads, 2, 'two loads, not three');
+  assert(r.trips[0].called.every(c => c.src === 'tap'), 'labelled as driver taps');
+  // ...but an OLD build's tap (flag only, no events) still counts as load 1.
+  const r2 = L.roundTrips(L.segment([]), { pickup: { label: 'Pit' }, dropoff: { label: 'Site' }, events: [{ kind: 'dumped', event_at: iso(T0 + 60 * MIN), source: 'dispatcher' }], job: { picked_up_at: iso(T0), pickup_source: 'tap' } });
+  assert.strictEqual(r2.summary.loads, 1);
+  console.log('ok 12 late-synced driver tap is not double-counted; old-build tap still counts');
+}
 console.log('all round-trip tests passed');

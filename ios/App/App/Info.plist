@@ -36,6 +36,18 @@
 	<string>Cooney's Trucking lets you attach a photo of the load or the site when you mark a job complete.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Cooney's Trucking lets you attach an existing photo from your library when you mark a job complete.</string>
+	<!-- Open in Maps (2026-10-12, migration 0013). The driver app no longer
+	     routes anyone: it hands the destination to the driver's OWN maps app.
+	     iOS only answers "is Google Maps / Waze / Apple Maps installed?"
+	     (@capacitor/app-launcher canOpenUrl) for schemes declared here, so the
+	     sheet can list just the apps that are really on the phone. Query only:
+	     this grants nothing and needs no Apple capability or new profile. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>comgooglemaps</string>
+		<string>waze</string>
+		<string>maps</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

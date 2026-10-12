@@ -95,9 +95,12 @@ Deno.serve(async (req) => {
     // Resolve the message + its dispatch server-side. Never trust client-
     // supplied body text or recipient identity — same rule send-dispatch-push
     // applies to site_address/driver_id.
+    // select('*'), not a column list: this function is deployed BEFORE the
+    // migration that adds `kind` (0013), and naming a column that does not exist
+    // yet would fail every lookup and silently stop all message pushes.
     const { data: message, error: msgErr } = await admin
       .from('dispatch_messages')
-      .select('id, dispatch_id, sender_id, body')
+      .select('*')
       .eq('id', messageId)
       .maybeSingle()
 
@@ -116,6 +119,23 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: 'You did not send this message' }, 403)
     }
 
+    // A driver's job NOTE (0013, kind = 'note') is for the record, not a call
+    // for attention: dispatch sees it live on the board, nobody's phone buzzes.
+    if (message.kind === 'note') {
+      return json({ ok: true, sent: 0, attempted: 0, reason: 'Notes do not push' }, 200)
+    }
+
+    // App Store demo accounts (Part 11). The fan-out below runs as service role,
+    // so RLS cannot stop it: a demo driver's message would otherwise reach EVERY
+    // real dispatcher's phone. Refuse anything that involves a demo account.
+    // demo_user_ids() is dropped by the demo cleanup block; a missing function
+    // just means "no demo accounts", so an rpc error is treated as an empty list.
+    const { data: demoIds } = await admin.rpc('demo_user_ids')
+    const demo = new Set(Array.isArray(demoIds) ? (demoIds as string[]) : [])
+    if (demo.has(user.id)) {
+      return json({ ok: true, sent: 0, attempted: 0, reason: 'Demo account: push suppressed' }, 200)
+    }
+
     const { data: dispatch, error: dispatchErr } = await admin
       .from('dispatches')
       .select('id, driver_id, site_address')
@@ -125,6 +145,11 @@ Deno.serve(async (req) => {
     if (dispatchErr || !dispatch) {
       console.error(`[msg-push] not sent: dispatch for message ${messageId} could not be resolved`)
       return json({ ok: true, sent: 0, attempted: 0, reason: 'Dispatch could not be resolved' }, 200)
+    }
+    // ...and a real account messaging on a demo job (cannot happen through RLS
+    // today, but this is the service-role path) must not push the demo phone.
+    if (demo.has(dispatch.driver_id)) {
+      return json({ ok: true, sent: 0, attempted: 0, reason: 'Demo job: push suppressed' }, 200)
     }
 
     const { data: senderProfile } = await admin

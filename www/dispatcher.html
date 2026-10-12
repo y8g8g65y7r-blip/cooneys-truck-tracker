@@ -346,6 +346,22 @@
     .message-bubble.mine { align-self: flex-end; background: var(--brand-blue); color: #fff; border-bottom-right-radius: 4px; }
     .message-bubble.theirs { align-self: flex-start; background: #fff; border: 1px solid #eef0f2; color: #15161a; border-bottom-left-radius: 4px; }
     .message-bubble .meta { font-size: 10px; opacity: 0.7; margin-top: 3px; }
+    /* 0013: the driver's Loaded/Unloaded taps, job notes and milestones share
+       the thread with messages, so dispatch reads one timeline per job. */
+    .t-sys { align-self: center; font-size: 11px; color: #8a9099; font-weight: 600; text-align: center; }
+    .t-ev { align-self: center; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 800;
+      padding: 5px 11px; border-radius: 16px; }
+    .t-ev .who { font-weight: 600; opacity: 0.8; }
+    .t-ev.loaded { background: #fff7ed; color: #92400e; box-shadow: inset 0 0 0 1px #fcd9a8; }
+    .t-ev.dumped { background: #eef4ff; color: var(--brand-blue); box-shadow: inset 0 0 0 1px #cfe0ff; }
+    .t-note { align-self: stretch; background: #fffbea; color: #3f3a1a; border-radius: 10px; padding: 8px 11px;
+      font-size: 13px; box-shadow: inset 3px 0 0 #eab308; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .t-note .k { display: block; font-size: 9.5px; font-weight: 900; letter-spacing: 0.8px; text-transform: uppercase; color: #a16207; }
+    .t-note .meta { font-size: 10px; opacity: 0.7; margin-top: 3px; }
+    /* Board row: the driver's latest Loaded/Unloaded, painted in place. */
+    .dispatch-info .activity { font-size: 11.5px; font-weight: 700; margin-top: 2px; color: #6c757d; }
+    .dispatch-info .activity .loaded { color: #92400e; }
+    .dispatch-info .activity .dumped { color: var(--brand-blue); }
     .quick-replies { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; }
     .quick-reply-chip {
       flex-shrink: 0;
@@ -888,6 +904,7 @@
   <script src="legs.js"></script>
   <script src="stops.js"></script>
   <script src="geocode.js"></script>
+  <script src="jobkit.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -956,6 +973,11 @@
     let messagesById = {}
     let messagesChannel = null
     let loadEventsChannel = null
+    // Load events per job for the board's activity line and the merged thread
+    // (0013). boardSeen remembers which driver taps were already painted, so
+    // only a NEW tap flashes its row.
+    let eventsById = {}
+    let boardSeen = null
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -991,6 +1013,8 @@
         .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_load_events' }, (payload) => {
           const id = (payload.new && payload.new.dispatch_id) || (payload.old && payload.old.dispatch_id)
           if (detailLoads.id && (!id || id === detailLoads.id)) fetchLoadEvents(detailLoads.id)
+          refreshBoardEvents()
+          openMessagePanels.forEach(pid => { if (!id || pid === id) loadMessages(pid) })
         })
         .subscribe()
 
@@ -1082,36 +1106,51 @@
 
     async function loadMessages(id) {
       const listEl = document.querySelector('[data-message-list="' + CSS.escape(id) + '"]')
-      const { data, error } = await sb.from('dispatch_messages')
-        .select('*')
-        .eq('dispatch_id', id)
-        .order('created_at', { ascending: true })
-        .limit(200)
+      const [{ data, error }, ev] = await Promise.all([
+        sb.from('dispatch_messages').select('*').eq('dispatch_id', id).order('created_at', { ascending: true }).limit(200),
+        sb.from('dispatch_load_events').select('id, dispatch_id, kind, event_at, note, source, driver_id').eq('dispatch_id', id).order('event_at', { ascending: true })
+      ])
       if (error) {
         if (listEl) listEl.innerHTML = '<div class="message-empty">Could not load messages — tap Messages again to retry.</div>'
         return
       }
       messagesById[id] = data || []
+      if (!ev.error) eventsById[id] = ev.data || []
       renderMessageList(id)
     }
 
     function renderMessageList(id) {
       const listEl = document.querySelector('[data-message-list="' + CSS.escape(id) + '"]')
       if (!listEl) return
-      const rows = messagesById[id] || []
-      if (rows.length === 0) {
+      const job = jobById[id] || {}
+      const items = JobKit.threadItems({ messages: messagesById[id] || [], events: eventsById[id] || [], job: job, myId: currentUser.id })
+        .filter(x => x.type !== 'system' || x.what !== 'sent')
+      if (!items.some(x => x.type === 'message' || x.type === 'note' || x.type === 'event')) {
         listEl.innerHTML = '<div class="message-empty">No messages yet</div>'
         return
       }
-      listEl.innerHTML = rows.map(m => {
-        const mine = m.sender_id === currentUser.id
-        const driver = driverMap[(jobById[id] || {}).driver_id]
-        const theirLabel = driver ? ('Unit ' + (driver.unit_number || '—')) : 'Driver'
-        const timeStr = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const driver = driverMap[job.driver_id]
+      const unit = driver ? ('Unit ' + (driver.unit_number || '—')) : 'Driver'
+      const tm = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      // A message from ANOTHER dispatcher is not the driver: label by sender.
+      const who = x => x.mine ? 'You' : (x.senderId === job.driver_id ? unit : 'Dispatch')
+      listEl.innerHTML = items.map(x => {
+        if (x.type === 'system') {
+          const s = x.what === 'accepted' ? unit + ' accepted' : x.what === 'picked_up' ? 'Marked loaded' + (x.source === 'geofence' ? ' (auto, left pickup)' : x.source === 'dispatch' ? ' (by dispatch)' : '')
+            : x.what === 'completed' ? 'Job completed' : 'Job cancelled'
+          return `<div class="t-sys">${escapeHtml(s)} · ${tm(x.at)}</div>`
+        }
+        if (x.type === 'event') {
+          const by = x.source === 'driver' ? unit + ' tapped' : x.source === 'geofence' ? 'from GPS' : 'logged by dispatch'
+          return `<div class="t-ev ${x.kind}">${x.kind === 'dumped' ? '&#8595; Unloaded' : '&#8593; Loaded'} ${tm(x.at)}<span class="who">· ${escapeHtml(by)}</span></div>`
+        }
+        if (x.type === 'note') {
+          return `<div class="t-note"><span class="k">Note · ${escapeHtml(who(x))}</span>${escapeHtml(x.body)}<div class="meta">${tm(x.at)}</div></div>`
+        }
         return `
-          <div class="message-bubble ${mine ? 'mine' : 'theirs'}">
-            <div>${escapeHtml(m.body)}</div>
-            <div class="meta">${mine ? 'You' : escapeHtml(theirLabel)} · ${timeStr}</div>
+          <div class="message-bubble ${x.mine ? 'mine' : 'theirs'}">
+            <div>${escapeHtml(x.body)}</div>
+            <div class="meta">${escapeHtml(who(x))} · ${tm(x.at)}</div>
           </div>
         `
       }).join('')
@@ -1452,29 +1491,35 @@
       if (!editable && !evs.length && !d.picked_up_at) { el.innerHTML = ''; return }
       const who = id => escapeHtml(detailLoads.names[id] || 'dispatch')
       const rows = []
-      if (d.picked_up_at && DispatchStops.hasPickup(d)) {
+      // The stage flag is only shown when no logged Loaded explains it: since
+      // 0013 a driver's Loaded tap is an event AND sets the flag, and showing
+      // both would read as two loads.
+      const pt = d.picked_up_at ? new Date(d.picked_up_at).getTime() : null
+      const flagExplained = pt != null && evs.some(e => e.kind === 'loaded' &&
+        (Math.abs(new Date(e.event_at).getTime() - pt) <= 2 * 60000 || (e.source === 'driver' && d.pickup_source === 'tap')))
+      if (d.picked_up_at && DispatchStops.hasPickup(d) && !flagExplained) {
         rows.push(`<li class="load-row sys"><span class="k loaded">Loaded</span><span class="tm">${hhmm(new Date(d.picked_up_at).getTime())}</span>
           <span class="nt">First load · ${escapeHtml(DispatchStops.sourceText(d.pickup_source) || 'marked loaded')}</span></li>`)
       }
       evs.forEach(e => {
         const isEdit = detailLoads.editing === e.id
         if (isEdit) { rows.push(loadFormHtml(e.kind, e)); return }
-        rows.push(`<li class="load-row"><span class="k ${e.kind}">${e.kind === 'dumped' ? 'Dumped' : 'Loaded'}</span>
+        rows.push(`<li class="load-row"><span class="k ${e.kind}">${e.kind === 'dumped' ? 'Unloaded' : 'Loaded'}</span>
           <span class="tm">${hhmm(new Date(e.event_at).getTime())}</span>
-          <span class="nt">${e.note ? escapeHtml(e.note) + ' · ' : ''}${e.source === 'geofence' ? 'from GPS' : 'by ' + who(e.entered_by)}${e.updated_at ? ' · edited by ' + who(e.updated_by) : ''}</span>
+          <span class="nt">${e.note ? escapeHtml(e.note) + ' · ' : ''}${e.source === 'geofence' ? 'from GPS' : e.source === 'driver' ? 'driver tapped' : 'by ' + who(e.entered_by)}${e.updated_at ? ' · edited by ' + who(e.updated_by) : ''}</span>
           ${editable ? `<span class="acts"><button type="button" data-load-edit="${escapeHtml(e.id)}">Edit</button><button type="button" class="del" data-load-del="${escapeHtml(e.id)}">Delete</button></span>` : ''}</li>`)
       })
       const form = detailLoads.formKind && !detailLoads.editing ? loadFormHtml(detailLoads.formKind, null) : ''
       el.innerHTML = `
-        <div class="loads-head"><span class="t">Loads called in</span><span class="c">${evs.length ? evs.length + ' logged' : 'none logged yet'}</span></div>
+        <div class="loads-head"><span class="t">Loads</span><span class="c">${evs.length ? evs.length + ' logged' : 'none logged yet'}</span></div>
         ${editable ? `<div class="loads-actions">
           <button type="button" class="btn-log loaded" data-load-new="loaded">+ Loaded</button>
-          <button type="button" class="btn-log dumped" data-load-new="dumped">+ Dumped</button>
+          <button type="button" class="btn-log dumped" data-load-new="dumped">+ Unloaded</button>
         </div>` : ''}
         ${form}
         ${rows.length ? `<ul class="loads-list">${rows.join('')}</ul>` : ''}
         ${detailLoads.error ? '<div class="loads-err">Could not load the logged loads. Close and reopen to retry.</div>' : ''}
-        ${editable ? '<div class="loads-hint">When the driver calls in a dump or a reload, log it here. Time defaults to now; change it if the call came late.</div>' : ''}`
+        ${editable ? '<div class="loads-hint">Drivers tap Loaded / Unloaded in the app and it shows here live. If a driver phones one in instead, log it here. Time defaults to now; change it if the call came late.</div>' : ''}`
       const first = el.querySelector('.load-form input[type="time"]')
       if (first && !first.dataset.focused) { first.dataset.focused = '1'; first.focus() }
     }
@@ -1483,9 +1528,9 @@
       const t = ev ? hhmm(new Date(ev.event_at).getTime()) : hhmm(Date.now())
       return `<form class="load-form" data-load-form="${ev ? escapeHtml(ev.id) : ''}">
         <div class="lf-row">
-          <select name="kind" aria-label="Loaded or dumped">
+          <select name="kind" aria-label="Loaded or unloaded">
             <option value="loaded"${kind === 'loaded' ? ' selected' : ''}>Loaded</option>
-            <option value="dumped"${kind === 'dumped' ? ' selected' : ''}>Dumped</option>
+            <option value="dumped"${kind === 'dumped' ? ' selected' : ''}>Unloaded</option>
           </select>
           <input type="time" name="time" value="${t}" required aria-label="Time">
         </div>
@@ -1506,7 +1551,7 @@
       const db = e.target.closest('[data-load-del]')
       if (db) {
         const ev = detailLoads.events.find(x => x.id === db.dataset.loadDel)
-        if (!ev || !confirm(`Delete the ${ev.kind} logged at ${hhmm(new Date(ev.event_at).getTime())}?`)) return
+        if (!ev || !confirm(`Delete the ${ev.kind === 'dumped' ? 'Unloaded' : 'Loaded'} logged at ${hhmm(new Date(ev.event_at).getTime())}?`)) return
         db.disabled = true
         const { error } = await sb.from('dispatch_load_events').delete().eq('id', ev.id)
         if (error) { db.disabled = false; alert('Could not delete: ' + error.message); return }
@@ -2278,6 +2323,7 @@
               <div class="dispatch-info">
                 <div class="addr">${routeHtml(d)}</div>
                 <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
+                <div class="activity" data-activity-for="${id}"></div>
               </div>
               ${pill}
               <button class="btn-legs" data-action="legs" data-id="${id}">Trips</button>
@@ -2304,6 +2350,48 @@
       openMessagePanels.forEach(id => {
         if (data.some(d => d.id === id)) loadMessages(id)
         else openMessagePanels.delete(id)
+      })
+      refreshBoardEvents()
+    }
+
+    // The driver's Loaded/Unloaded taps on the Active board (0013). Painted into
+    // each row's activity line IN PLACE, never by rebuilding the list: a
+    // dispatcher may be half-way through typing a message in an open panel.
+    let boardEventsTimer = null
+    function refreshBoardEvents() {
+      clearTimeout(boardEventsTimer)
+      boardEventsTimer = setTimeout(async () => {
+        const ids = Object.values(jobById).filter(d => d.status === 'active').map(d => d.id)
+        if (!ids.length) return
+        const { data, error } = await sb.from('dispatch_load_events')
+          .select('id, dispatch_id, kind, event_at, source, driver_id').in('dispatch_id', ids).order('event_at', { ascending: true })
+        if (error) return
+        const map = {}
+        ;(data || []).forEach(e => { (map[e.dispatch_id] = map[e.dispatch_id] || []).push(e) })
+        ids.forEach(id => { eventsById[id] = map[id] || [] })
+        paintActivity()
+      }, 250)
+    }
+
+    function paintActivity() {
+      const firstPaint = boardSeen === null
+      if (firstPaint) boardSeen = new Set()
+      document.querySelectorAll('#activeList [data-activity-for]').forEach(el => {
+        const id = el.dataset.activityFor
+        const evs = eventsById[id] || []
+        const loads = evs.filter(e => e.kind === 'loaded').length
+        const unloads = evs.filter(e => e.kind === 'dumped').length
+        const last = evs[evs.length - 1]
+        el.innerHTML = last
+          ? `${loads} loaded · ${unloads} unloaded · last <span class="${last.kind}">${last.kind === 'dumped' ? 'Unloaded' : 'Loaded'} ${escapeHtml(clock(last.event_at))}</span>${last.source === 'driver' ? ' (driver)' : last.source === 'geofence' ? ' (GPS)' : ' (logged)'}`
+          : ''
+        // Flash the row when a driver tap arrives that we have not shown yet.
+        const fresh = evs.filter(e => e.source === 'driver' && !boardSeen.has(e.id))
+        fresh.forEach(e => boardSeen.add(e.id))
+        if (fresh.length && !firstPaint) {
+          const row = el.closest('.dispatch-item')
+          if (row) { row.classList.remove('just-loaded'); void row.offsetWidth; row.classList.add('just-loaded') }
+        }
       })
     }
 

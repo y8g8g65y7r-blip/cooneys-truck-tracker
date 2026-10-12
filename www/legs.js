@@ -530,15 +530,23 @@
 
   function manualBoundaries(events, job) {
     var out = [];
+    var driverLoaded = false;
     (events || []).forEach(function (e) {
       var t = new Date(e.event_at).getTime();
       if (!isFinite(t)) return;
-      // source 'geofence' = logged from the GPS trail (e.g. a backfill), not a phone call.
-      out.push({ type: e.kind === 'dumped' ? 'Dleave' : 'Pleave', t: t, src: e.source === 'geofence' ? 'gpslog' : 'phone', eventId: e.id, note: e.note || null });
+      // source 'geofence' = logged from the GPS trail (e.g. a backfill), not a
+      // phone call; 'driver' = the driver's own Loaded/Unloaded tap (0013).
+      var src = e.source === 'geofence' ? 'gpslog' : (e.source === 'driver' ? 'tap' : 'phone');
+      if (e.source === 'driver' && e.kind === 'loaded') driverLoaded = true;
+      out.push({ type: e.kind === 'dumped' ? 'Dleave' : 'Pleave', t: t, src: src, eventId: e.id, note: e.note || null });
     });
     // The job's own "Loaded" (driver tap or office button) is the first load.
-    // A geofence stamp is GPS-derived already, so it adds nothing.
-    if (job && job.picked_up_at && (job.pickup_source === 'tap' || job.pickup_source === 'dispatch')) {
+    // A geofence stamp is GPS-derived already, so it adds nothing. Since 0013 a
+    // driver's Loaded tap is ALSO an event, and the stage flag it sets carries
+    // the SYNC time (a tap queued in a dead zone arrives late), so once the
+    // driver has logged any Loaded the flag is never counted as a second load.
+    if (job && job.picked_up_at && !(driverLoaded && job.pickup_source === 'tap') &&
+        (job.pickup_source === 'tap' || job.pickup_source === 'dispatch')) {
       var pt = new Date(job.picked_up_at).getTime();
       var dup = out.some(function (b) { return b.type === 'Pleave' && Math.abs(b.t - pt) <= 15 * 60 * 1000; });
       if (isFinite(pt) && !dup) out.push({ type: 'Pleave', t: pt, src: job.pickup_source === 'tap' ? 'tap' : 'phone' });
@@ -783,7 +791,7 @@
     var fl = rt.firstLoad;
     var head = '<div class="trips-head"><span class="t">Round trips</span><span class="route">' + esc(rt.pickup.label) + ' → ' + esc(rt.dropoff.label) + '</span></div>' +
       '<div class="trips-stats"><span><b>' + s.loads + '</b> load' + (s.loads === 1 ? '' : 's') + ' delivered</span>' +
-      (s.calledIn ? '<span><b>' + s.calledIn + '</b> called in</span>' : '') +
+      (s.calledIn ? '<span><b>' + s.calledIn + '</b> logged</span>' : '') +   // driver taps + phone-ins, not only calls (0013)
       '<span>Avg cycle <b>' + fmtShort(s.avgCycleMs) + '</b></span>' +
       (fl ? '<span>First load <b>' + (val(fl, false) || '—') + '</b></span>' : '') +
       (s.otherStopMs ? '<span>Other stops <b>' + fmtShort(s.otherStopMs) + '</b></span>' : '') + '</div>';
