@@ -2385,6 +2385,13 @@
         el.innerHTML = last
           ? `${loads} loaded · ${unloads} unloaded · last <span class="${last.kind}">${last.kind === 'dumped' ? 'Unloaded' : 'Loaded'} ${escapeHtml(clock(last.event_at))}</span>${last.source === 'driver' ? ' (driver)' : last.source === 'geofence' ? ' (GPS)' : ' (logged)'}`
           : ''
+        // The row's pill follows the latest tap on a shuttle (the stage flag
+        // alone would still say "Loaded" after the driver tapped Unloaded).
+        const pill = el.closest('.dispatch-item') && el.closest('.dispatch-item').querySelector('.status-pill')
+        if (pill && last) {
+          pill.className = 'status-pill ' + (last.kind === 'dumped' ? 'to-pickup' : 'loaded')
+          pill.textContent = (last.kind === 'dumped' ? 'Unloaded ' : 'Loaded ') + clock(last.event_at)
+        }
         // Flash the row when a driver tap arrives that we have not shown yet.
         const fresh = evs.filter(e => e.source === 'driver' && !boardSeen.has(e.id))
         fresh.forEach(e => boardSeen.add(e.id))

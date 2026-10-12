@@ -2101,7 +2101,8 @@
     function fitTo(map, pts) {
       if (!map || !pts.length) return
       if (pts.length === 1) map.setView(pts[0], 14)
-      else map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 15 })
+      // Clear of the status chip (top left) and the recenter button (top right).
+      else map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [36, 76], paddingBottomRight: [66, 36], maxZoom: 15 })
     }
 
     function updateHomeMap() {
