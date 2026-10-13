@@ -10,16 +10,18 @@
 --         Sold (11, 24) and "#87 Do not use" are loaded INACTIVE: kept for history,
 --         never offered to dispatch. Trailers are out of scope.
 --   app   Unit numbers on today's real driver profiles that are NOT on the Axon
---         list: 98 (Dario), 90 (Brano), 22 (Mike Kellstr). Active so dispatch can
---         pick them, confirmed=false until Matt says they are real trucks.
+--         list: 98 (Dario), 90 (Brano), 22 (Mike Kellstr). Matt 2026-10-13: these
+--         were TEST numbers he and Mike made up before they knew the real unit
+--         numbers, not trucks. Loaded INACTIVE (never offered to dispatch, never a
+--         default) and kept only so old jobs still show the number they had.
 --         T1 (test login) and E1 (Employee One seat, a placeholder per the 2026-09-24
 --         memory, not a truck number) are deliberately left out until Matt says otherwise.
 --         Unit 10 IS on the Axon list (A-38 row 2); Matt confirmed it in the fleet 2026-10-13.
 --   demo  The fictional App Store demo trucks 62/74/81, visible to demo
 --         accounts only (demo_isolation policy on units).
 --
--- Matt confirms a unit:   update public.units set confirmed = true where unit_number = '98' and not is_demo;
--- Matt says it is not a truck: update public.units set active = false, note = 'Not a truck (Matt)' where unit_number = '22' and not is_demo;
+-- Matt confirms a unit:   update public.units set confirmed = true where unit_number = '<n>' and not is_demo and active;
+-- Matt says it is not a truck: update public.units set active = false, note = 'Not a truck (Matt)' where unit_number = '<n>' and not is_demo;
 -- (or use the Units page in the app)
 -- ============================================================
 
@@ -50,9 +52,9 @@ insert into public.units (seed_key, unit_number, year, make, plate, vin, active,
   ('axon:964:1HTWNADR75J044964', '964', null, 'International',           null,      '1HTWNADR75J044964', true,  true, 'axon', false, 'Axon: year 0, no plate'),
   ('axon:97:5KJJALAV26PU75097',  '97',  2006, 'Western Star',            '91N729',  '5KJJALAV26PU75097', true,  true, 'axon', false, null),
   ('axon:99:3HSCUAPR6AN275111',  '99',  2010, 'International',           '79P420',  '3HSCUAPR6AN275111', true,  true, 'axon', false, 'Axon spells the make "Intenational"'),
-  ('app:98',                     '98',  null, null,                      null,      null,                true,  false, 'app', false, 'On Dario Lazic''s app profile; not on the Axon list. Confirm with Matt.'),
-  ('app:90',                     '90',  null, null,                      null,      null,                true,  false, 'app', false, 'On Brano Lazic''s app profile; not on the Axon list. Confirm with Matt.'),
-  ('app:22',                     '22',  null, null,                      null,      null,                true,  false, 'app', false, 'On Mike Kellstr''s app profile; not on the Axon list. Confirm with Matt.'),
+  ('app:98',                     '98',  null, null,                      null,      null,                false, false, 'app', false, 'Test number Matt and Mike made up before they knew the real unit numbers (Matt 2026-10-13). Not a truck. Kept so old jobs still show it.'),
+  ('app:90',                     '90',  null, null,                      null,      null,                false, false, 'app', false, 'Test number Matt and Mike made up before they knew the real unit numbers (Matt 2026-10-13). Not a truck. Kept so old jobs still show it.'),
+  ('app:22',                     '22',  null, null,                      null,      null,                false, false, 'app', false, 'Test number Matt and Mike made up before they knew the real unit numbers (Matt 2026-10-13). Not a truck. Kept so old jobs still show it.'),
   ('demo:62',                    '62',  null, null,                      null,      null,                true,  true, 'demo', true,  'App Store demo truck (fictional)'),
   ('demo:74',                    '74',  null, null,                      null,      null,                true,  true, 'demo', true,  'App Store demo truck (fictional)'),
   ('demo:81',                    '81',  null, null,                      null,      null,                true,  true, 'demo', true,  'App Store demo truck (fictional)')

@@ -17,21 +17,28 @@ begin
 
   -- ----- seed + backfill -----
   select count(*) into n from units where active and not is_demo;
-  res := res || jsonb_build_object('t', 'seed: 26 active real units (23 Axon + 98/90/22)', 'ok', n = 26, 'msg', n);
+  res := res || jsonb_build_object('t', 'seed: 23 active real units (Axon power units only)', 'ok', n = 23, 'msg', n);
   select count(*) into n from units where not active and not is_demo;
-  res := res || jsonb_build_object('t', 'seed: 3 inactive (11 sold, 24 sold, #87 do not use)', 'ok', n = 3, 'msg', n);
-  select count(*) into n from units where source = 'app' and not confirmed and active;
-  res := res || jsonb_build_object('t', 'seed: 98/90/22 active but unconfirmed', 'ok', n = 3);
-  select count(*) into n from dispatches where driver_id = DARIO and (unit_number is distinct from '98');
-  res := res || jsonb_build_object('t', 'backfill: every Dario job shows 98 (what the old screens showed)', 'ok', n = 0, 'msg', n);
-  select count(*) into n from dispatches d join profiles p on p.id = d.driver_id where d.unit_number is null and p.unit_number is not null;
-  res := res || jsonb_build_object('t', 'backfill: no job left without its unit text', 'ok', n = 0, 'msg', n);
+  res := res || jsonb_build_object('t', 'seed: 6 inactive (11, 24 sold; #87 do not use; 98/90/22 test numbers)', 'ok', n = 6, 'msg', n);
+  select count(*) into n from units where source = 'app' and not active and unit_number in ('98', '90', '22');
+  res := res || jsonb_build_object('t', 'seed: 98/90/22 kept but retired (test numbers, Matt 2026-10-13)', 'ok', n = 3);
+  select count(*) into n from dispatches where driver_id = DARIO and status <> 'active' and (unit_number is distinct from '98');
+  res := res || jsonb_build_object('t', 'history: Dario''s closed jobs still show 98', 'ok', n = 0, 'msg', n);
+  select count(*) into n from dispatches d join units u on u.id = d.unit_id where d.status = 'active' and not u.active;
+  res := res || jsonb_build_object('t', 'no open job carries a retired/test unit', 'ok', n = 0, 'msg', n);
+  select count(*) into n from dispatches d join profiles p on p.id = d.driver_id where d.unit_number is null and p.unit_number is not null and d.status <> 'active';
+  res := res || jsonb_build_object('t', 'backfill: no closed job left without its unit text', 'ok', n = 0, 'msg', n);
 
   -- ----- staff: sending and editing the unit -----
   execute 'set local role authenticated';
   perform set_config('request.jwt.claims', json_build_object('sub', S, 'role', 'authenticated')::text, true);
   insert into dispatches (driver_id, site_address, notes, created_by, created_at) values (A, 'ZZU default', 'ZZTEST', S, now() - interval '10 minutes') returning id, unit_number into j, msg;
-  res := res || jsonb_build_object('t', 'old-build send (no unit): defaults to the driver''s last unit', 'ok', msg = '22', 'msg', msg);
+  res := res || jsonb_build_object('t', 'old-build send, driver whose only unit is a retired test number (22): No unit, not 22', 'ok', msg is null, 'msg', msg);
+  insert into dispatches (driver_id, site_address, notes, created_by) values (DARIO, 'ZZU dario', 'ZZTEST', S) returning unit_id, unit_number into r;
+  res := res || jsonb_build_object('t', 'old-build send for Dario: No unit, never 98', 'ok', r.unit_id is null and r.unit_number is null, 'msg', r.unit_number);
+  begin insert into dispatches (driver_id, site_address, notes, created_by, unit_id) values (DARIO, 'ZZU 98', 'ZZTEST', S, (select id from units where seed_key = 'app:98')); ok := false;
+  exception when others then ok := true; end;
+  res := res || jsonb_build_object('t', 'test unit 98 cannot be assigned', 'ok', ok);
   insert into dispatches (driver_id, site_address, notes, created_by, unit_id, created_at) values (A, 'ZZU ten', 'ZZTEST', S, u10, now() - interval '5 minutes') returning id, unit_number into j2, msg;
   res := res || jsonb_build_object('t', 'dispatcher puts the driver in unit 10', 'ok', msg = '10');
   insert into dispatches (driver_id, site_address, notes, created_by, created_at) values (A, 'ZZU next', 'ZZTEST', S, now()) returning id, unit_number into j3, msg;

@@ -1906,9 +1906,12 @@
       if (!unitsLoaded || !driverId) { hint.textContent = ''; return }
       const name = (driverMap[driverId] || {}).full_name || 'this driver'
       const { data } = await sb.from('dispatches').select('unit_id, unit_number')
-        .eq('driver_id', driverId).not('unit_id', 'is', null).order('created_at', { ascending: false }).limit(1)
+        .eq('driver_id', driverId).not('unit_id', 'is', null).order('created_at', { ascending: false }).limit(25)
       if (document.getElementById('driverSelect').value !== driverId) return
-      const last = data && data[0] && unitsList.find(u => u.id === data[0].unit_id)
+      // Same rule as the server default: skip retired / test units (unitsList is
+      // active units only). Nothing active on record -> "No unit".
+      const lastRow = (data || []).find(r => unitsList.some(u => u.id === r.unit_id))
+      const last = lastRow ? unitsList.find(u => u.id === lastRow.unit_id) : null
       const prof = (driverMap[driverId] || {}).unit_number
       const fromProfile = !last && prof ? unitsList.find(u => String(u.unit_number).toLowerCase() === String(prof).trim().toLowerCase()) : null
       const pick = last || fromProfile
