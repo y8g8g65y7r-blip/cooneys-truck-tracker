@@ -12,7 +12,9 @@
 --   app   Unit numbers on today's real driver profiles that are NOT on the Axon
 --         list: 98 (Dario), 90 (Brano), 22 (Mike Kellstr). Active so dispatch can
 --         pick them, confirmed=false until Matt says they are real trucks.
---         T1 (test login) and E1 (Employee One seat) are deliberately left out.
+--         T1 (test login) and E1 (Employee One seat, a placeholder per the 2026-09-24
+--         memory, not a truck number) are deliberately left out until Matt says otherwise.
+--         Unit 10 IS on the Axon list (A-38 row 2); Matt confirmed it in the fleet 2026-10-13.
 --   demo  The fictional App Store demo trucks 62/74/81, visible to demo
 --         accounts only (demo_isolation policy on units).
 --
@@ -23,7 +25,7 @@
 
 insert into public.units (seed_key, unit_number, year, make, plate, vin, active, confirmed, source, is_demo, note) values
   ('axon:#87:3AKJGED17GSGZ6087', '87',  2015, 'Freightliner',            '89P618',  '3AKJGED17GSGZ6087', false, true, 'axon', false, 'Axon name "#87 Do not use". Not the active 87.'),
-  ('axon:10:1FVHALCK57DY44749',  '10',  2007, 'Freightliner',            '89N157',  '1FVHALCK57DY44749', true,  true, 'axon', false, null),
+  ('axon:10:1FVHALCK57DY44749',  '10',  2007, 'Freightliner',            '89N157',  '1FVHALCK57DY44749', true,  true, 'axon', false, 'Confirmed in the fleet by Matt Kelly 2026-10-13 (also on the Axon list, row 2 of A-38)'),
   ('axon:11:1FVHALCK57DX56638',  '11',  2007, 'Freightliner',            '91N717',  '1FVHALCK57DX56638', false, true, 'axon', false, 'Sold per Axon'),
   ('axon:14S:1HTWGAAR5AJ250468', '14S', 2010, 'International 7700',      null,      '1HTWGAAR5AJ250468', true,  true, 'axon', false, 'Plate missing in Axon'),
   ('axon:16:5KKHAXDV9GPHA4744',  '16',  2016, 'Western Star',            '79P349',  '5KKHAXDV9GPHA4744', true,  true, 'axon', false, null),
