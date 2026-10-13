@@ -1,0 +1,2960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Cooney's Trucking — My Truck</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#15161a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #15161a;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .header {
+      padding: 14px 20px;
+      padding-top: calc(14px + env(safe-area-inset-top));
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-img { height: 34px; width: auto; display: block; }
+    .unit-badge {
+      background: var(--brand-blue);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 4px 9px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+    }
+    .btn-signout {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px 16px 40px;
+      gap: 14px;
+    }
+    .main > * { width: 100%; max-width: 440px; }
+    body.view-job #homeView { display: none; }
+    #jobView { display: none; }
+    body.view-job #jobView { display: flex; }
+
+    /* --- Maps (driver side) -----------------------------------------------------
+       The driver sees where THEY are and where the stops are. Deliberately no
+       route line, distance or drive time anywhere on the driver side: the route
+       is the driver's own choice in their own maps app (Open in Maps). */
+    .map-card { position: relative; border-radius: 16px; overflow: hidden; background: #22242a; }
+    .map { width: 100%; background: #e9ecef; }
+    .map-home { height: 210px; }
+    .map-job { height: 230px; }
+    .map-fallback {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.55); font-size: 13px; font-weight: 600; text-align: center; padding: 20px;
+      background: #22242a; z-index: 500;
+    }
+    .map-fallback[hidden] { display: none; }
+    .map-chip {
+      position: absolute; top: 10px; left: 10px; z-index: 600;
+      display: inline-flex; align-items: center; gap: 7px;
+      background: rgba(21,22,26,0.88); color: #fff; border-radius: 20px;
+      padding: 7px 12px 7px 10px; font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .map-chip .dot { width: 9px; height: 9px; border-radius: 50%; background: #9aa0a6; }
+    .map-chip.active .dot { background: #22c55e; animation: chip-pulse 2s infinite; }
+    .map-chip.active { color: #4ade80; }
+    /* Parked past the alert threshold: amber and NOT pulsing. A heads-up that
+       the office is about to see it, not a violation. */
+    .map-chip.parked .dot { background: #f59e0b; animation: none; }
+    .map-chip.parked { color: #fbbf24; }
+    @keyframes chip-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); }
+      70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); }
+      100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+    }
+    .map-btn {
+      position: absolute; right: 10px; top: 10px; z-index: 600;
+      width: 44px; height: 44px; border-radius: 12px; border: none;
+      background: #fff; color: var(--brand-blue); box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
+    }
+    .map-btn svg { width: 22px; height: 22px; }
+    .map-foot {
+      display: flex; justify-content: space-between; gap: 10px;
+      padding: 9px 14px; font-size: 11.5px; color: rgba(255,255,255,0.55); background: #1d1f24;
+    }
+    .map-foot b { color: rgba(255,255,255,0.85); font-weight: 700; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .legend .l-me { background: #2563eb; box-shadow: 0 0 0 2px #fff; }
+    .legend .l-p { background: #b45309; }
+    .legend .l-d { background: var(--brand-blue); }
+    /* Leaflet divIcons */
+    .me-marker { width: 22px; height: 22px; border-radius: 50%; background: #2563eb; border: 3px solid #fff;
+      box-shadow: 0 0 0 0 rgba(37,99,235,0.5), 0 1px 4px rgba(0,0,0,0.4); animation: me-pulse 2.4s infinite; }
+    @keyframes me-pulse { 0% { box-shadow: 0 0 0 0 rgba(37,99,235,0.45), 0 1px 4px rgba(0,0,0,0.4); }
+      70% { box-shadow: 0 0 0 14px rgba(37,99,235,0), 0 1px 4px rgba(0,0,0,0.4); } 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0), 0 1px 4px rgba(0,0,0,0.4); } }
+    .pin { position: relative; width: 30px; height: 40px; }
+    .pin b {
+      position: absolute; left: 0; top: 0; width: 30px; height: 30px; border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg); border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+    }
+    .pin span { position: absolute; left: 0; top: 0; width: 30px; height: 30px; display: flex; align-items: center;
+      justify-content: center; color: #fff; font: 900 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+    .pin.p b { background: #b45309; }
+    .pin.d b { background: #004AAD; }
+    .pin.done b { background: #6b7280; }
+    @media (prefers-reduced-motion: reduce) { .me-marker, .map-chip.active .dot { animation: none; } }
+
+    .offline-note {
+      background: rgba(234,179,8,0.15);
+      color: #fde047;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      display: none;
+    }
+    .offline-note.show { display: block; }
+    .outbox-chip {
+      display: none; align-items: center; justify-content: space-between; gap: 10px;
+      background: rgba(234,179,8,0.15); color: #fde047; border: none; border-radius: 10px;
+      padding: 10px 14px; font-size: 12px; font-weight: 700; text-align: left; cursor: pointer; font-family: inherit;
+    }
+    .outbox-chip.show { display: flex; }
+    .outbox-chip.failed { background: rgba(239,68,68,0.16); color: #fca5a5; }
+    .section-title {
+      font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+      color: rgba(255,255,255,0.45); margin-top: 4px;
+    }
+
+    /* --- Job cards (home) ------------------------------------------------------ */
+    .dispatch-list { display: flex; flex-direction: column; gap: 12px; }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 16px 18px;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 800; color: #6c757d;
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;
+    }
+    .dispatch-empty { font-size: 14px; color: #9aa0a6; text-align: center; padding: 8px 0; }
+    .job-card { position: relative; }
+    .job-card.accepted { box-shadow: 0 0 0 2px #22c55e; }
+    .jc-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    .jc-when { font-size: 12px; color: #6c757d; font-weight: 600; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 800;
+      letter-spacing: 0.6px; text-transform: uppercase; padding: 4px 9px; border-radius: 20px;
+    }
+    .pill.pending { background: #fff7ed; color: #9a3412; }
+    .pill.accepted { background: #f0fdf4; color: #15803d; }
+    .pill.loaded { background: #fff7ed; color: #92400e; }
+    .pill.done { background: #f1f5f9; color: #475569; }
+    .pill.cancelled { background: #fef2f2; color: #b91c1c; }
+    .pill.unread { background: #004AAD; color: #fff; margin-left: auto; }
+    .jc-address { font-size: 17px; font-weight: 800; color: #15161a; overflow-wrap: anywhere; line-height: 1.25; }
+    .jc-notes {
+      font-size: 13px; color: #4b5563; margin-top: 8px; overflow-wrap: anywhere;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .jc-loads { font-size: 12px; font-weight: 700; color: #92400e; margin-top: 8px; }
+    .jc-actions { display: flex; gap: 10px; margin-top: 14px; }
+    .btn-accept, .btn-open, .btn-details {
+      border: none; border-radius: 12px; font-size: 15px; font-weight: 800; cursor: pointer;
+      padding: 15px 14px; font-family: inherit; min-height: 52px;
+    }
+    /* #15803d: 5.0:1 with white on the white card (the old #22c55e was 2.3:1). */
+    .btn-accept { flex: 1; background: #15803d; color: #fff; }
+    .btn-accept:active { background: #166534; }
+    .btn-accept:disabled { background: #14532d; cursor: not-allowed; }
+    .btn-open { flex: 1; background: var(--brand-blue); color: #fff; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .btn-open:active { background: var(--brand-blue-hover); }
+    .btn-details { background: #f1f3f5; color: #15161a; padding: 15px 18px; }
+
+    /* --- Stops rail (pickup -> drop-off) ---------------------------------------- */
+    .stop-list { position: relative; margin: 2px 0 0; }
+    .stop { display: flex; gap: 12px; align-items: flex-start; position: relative; padding: 9px 0; }
+    .stop + .stop::before {
+      content: ''; position: absolute; left: 13px; top: -10px; height: 20px;
+      border-left: 2px dashed #cbd5e1;
+    }
+    .stop-dot {
+      flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 900; background: #eef0f3; color: #6c757d;
+    }
+    .stop.pickup .stop-dot { background: #fff7ed; color: #b45309; }
+    .stop.dropoff .stop-dot { background: #eaf1ff; color: var(--brand-blue); }
+    .stop.current.pickup .stop-dot { background: #b45309; color: #fff; box-shadow: 0 0 0 4px #fde9d4; }
+    .stop.current.dropoff .stop-dot { background: var(--brand-blue); color: #fff; box-shadow: 0 0 0 4px #dbe7fb; }
+    .stop.done .stop-dot { background: #15803d; color: #fff; }
+    .stop-body { flex: 1; min-width: 0; }
+    .stop-kind { font-size: 10.5px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: #6c757d; }
+    .stop.current .stop-kind { color: #15161a; }
+    .stop-name { font-size: 17px; font-weight: 800; color: #15161a; overflow-wrap: anywhere; line-height: 1.25; }
+    .stop.done .stop-name { color: #6c757d; }
+    .stop-addr { font-size: 13px; color: #6c757d; overflow-wrap: anywhere; }
+    .stop-state { font-size: 12px; font-weight: 700; color: #15803d; margin-top: 3px; }
+    .stop-state .undo {
+      background: none; border: none; color: var(--brand-blue); font-weight: 700; font-size: 12px;
+      text-decoration: underline; padding: 8px 4px; margin: -8px 0; cursor: pointer; font-family: inherit;
+    }
+    /* Outline, never filled: a filled blue button on this screen means
+       "Unloaded", and the two must not be confused by a thumb in a moving cab.
+       Sits under the address so a long drop-off address keeps its width. */
+    .btn-nav {
+      margin-top: 8px; min-height: 44px; padding: 0 14px;
+      border: 1.5px solid #cfd8e3; background: #fff; color: var(--brand-blue);
+      border-radius: 10px; font-size: 12.5px; font-weight: 800; cursor: pointer; font-family: inherit;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-nav svg { width: 16px; height: 16px; }
+    .btn-nav:active { background: #eef3fb; }
+    .job-notes {
+      margin-top: 12px; padding: 10px 12px; background: #f6f7f9; border-radius: 10px;
+      font-size: 13.5px; color: #374151; overflow-wrap: anywhere; white-space: pre-wrap;
+    }
+    .job-notes b { display: block; font-size: 10.5px; letter-spacing: 0.8px; text-transform: uppercase; color: #6c757d; margin-bottom: 3px; }
+
+    /* --- Job view ---------------------------------------------------------------- */
+    #jobView { flex-direction: column; min-height: 100vh; }
+    .job-bar {
+      position: sticky; top: 0; z-index: 1000; background: #15161a;
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; padding-top: calc(10px + env(safe-area-inset-top));
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .btn-back {
+      display: inline-flex; align-items: center; gap: 2px; background: rgba(255,255,255,0.1); color: #fff;
+      border: none; border-radius: 10px; padding: 0 12px 0 6px; height: 40px; font-size: 14px; font-weight: 700;
+      cursor: pointer; font-family: inherit;
+    }
+    .btn-back svg { width: 22px; height: 22px; }
+    .jb-title { flex: 1; min-width: 0; color: #fff; }
+    .jb-title .t { font-size: 15px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+    .jb-title .s { font-size: 11.5px; color: rgba(255,255,255,0.5); font-weight: 600; }
+    .job-scroll { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px 12px calc(32px + env(safe-area-inset-bottom)); }
+    .job-scroll > * { width: 100%; max-width: 440px; scroll-margin-top: 80px; }
+    .accept-card { background: #f0fdf4; box-shadow: inset 0 0 0 1.5px #bbf7d0; }
+    .accept-card p { font-size: 13px; color: #166534; margin-bottom: 12px; font-weight: 600; }
+    .accept-card .btn-accept { width: 100%; }
+    .readonly-note { font-size: 12.5px; color: #6c757d; font-weight: 600; }
+
+    /* Loaded / Unloaded: the two most-used buttons on the screen. Big, one tap,
+       repeatable all day on a shuttle, and the expected next one is solid while
+       the other is quieter (both always work: drivers forget one). */
+    .load-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .load-head .t { font-size: 11px; font-weight: 800; color: #6c757d; text-transform: uppercase; letter-spacing: 1px; }
+    .load-count { font-size: 13px; font-weight: 800; color: #15161a; font-variant-numeric: tabular-nums; }
+    .load-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn-load {
+      border: none; border-radius: 16px; min-height: 104px; padding: 14px 10px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+      font-family: inherit; cursor: pointer; transition: transform 0.08s;
+    }
+    .btn-load:active { transform: scale(0.97); }
+    .btn-load svg { width: 34px; height: 34px; }
+    .btn-load .big { font-size: 18px; font-weight: 900; letter-spacing: 0.6px; text-transform: uppercase; }
+    .btn-load .small { font-size: 11px; font-weight: 700; opacity: 0.85; }
+    /* amber #b45309 / blue #004AAD with white: 5.0:1 and 8.6:1 */
+    .btn-load.loaded { background: #b45309; color: #fff; }
+    .btn-load.unloaded { background: #004AAD; color: #fff; }
+    .btn-load.quiet.loaded { background: #fff7ed; color: #92400e; box-shadow: inset 0 0 0 2px #f5c99b; }
+    .btn-load.quiet.unloaded { background: #eef3fb; color: #004AAD; box-shadow: inset 0 0 0 2px #bcd0f0; }
+    .load-last { font-size: 12px; color: #6c757d; margin-top: 10px; text-align: center; font-weight: 600; }
+
+    /* Thread: messages, notes, Loaded/Unloaded and milestones on one timeline */
+    .thread-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .thread-head .t { font-size: 11px; font-weight: 800; color: #6c757d; text-transform: uppercase; letter-spacing: 1px; }
+    .thread-head .s { font-size: 11.5px; color: #9aa0a6; font-weight: 600; }
+    .thread { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow-y: auto; padding: 2px 0 6px; overscroll-behavior: contain; }
+    .t-empty { font-size: 13px; color: #9aa0a6; text-align: center; padding: 14px 0; }
+    .t-sys { align-self: center; font-size: 11.5px; color: #8a9099; font-weight: 600; text-align: center; padding: 2px 8px; }
+    .t-ev {
+      align-self: center; display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: center;
+      font-size: 12.5px; font-weight: 800; padding: 7px 12px; border-radius: 20px; max-width: 100%;
+    }
+    .t-ev svg { width: 15px; height: 15px; flex-shrink: 0; }
+    .t-ev.loaded { background: #fff7ed; color: #92400e; box-shadow: inset 0 0 0 1px #fcd9a8; }
+    .t-ev.dumped { background: #eef3fb; color: #004AAD; box-shadow: inset 0 0 0 1px #cfe0ff; }
+    .t-ev .who { font-weight: 600; opacity: 0.8; }
+    .t-ev.pending, .t-msg.pending { opacity: 0.75; }
+    .t-ev.failed, .t-msg.failed, .t-note.failed { box-shadow: inset 0 0 0 2px #ef4444; }
+    .t-state { font-size: 11px; font-weight: 700; }
+    .t-state.failed { color: #b91c1c; }
+    .t-act {
+      background: none; border: none; color: inherit; text-decoration: underline; font-weight: 800; font-size: 11.5px;
+      padding: 6px 4px; margin: -6px 0; cursor: pointer; font-family: inherit;
+    }
+    .t-msg { max-width: 84%; padding: 9px 13px; border-radius: 16px; font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .t-msg.mine { align-self: flex-end; background: var(--brand-blue); color: #fff; border-bottom-right-radius: 5px; }
+    .t-msg.theirs { align-self: flex-start; background: #f1f3f5; color: #15161a; border-bottom-left-radius: 5px; }
+    .t-msg .meta, .t-note .meta { font-size: 10.5px; opacity: 0.75; margin-top: 3px; white-space: normal; }
+    .t-note {
+      align-self: stretch; background: #fffbea; color: #3f3a1a; border-radius: 12px; padding: 9px 12px;
+      font-size: 13.5px; box-shadow: inset 3px 0 0 #eab308; overflow-wrap: anywhere; white-space: pre-wrap;
+    }
+    .t-note .k { font-size: 10px; font-weight: 900; letter-spacing: 0.8px; text-transform: uppercase; color: #a16207; display: block; margin-bottom: 2px; }
+
+    .composer { border-top: 1px solid #eef0f2; margin-top: 8px; padding-top: 12px; }
+    .seg { display: inline-flex; background: #f1f3f5; border-radius: 10px; padding: 3px; margin-bottom: 10px; }
+    .seg button {
+      border: none; background: none; padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 800;
+      color: #6c757d; cursor: pointer; font-family: inherit; min-height: 38px;
+    }
+    .seg button.on { background: #fff; color: #15161a; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+    .quick-replies { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; -webkit-overflow-scrolling: touch; }
+    .quick-reply-chip {
+      flex-shrink: 0; background: #eaf1ff; border: 1px solid #cfe0ff; color: var(--brand-blue);
+      border-radius: 16px; padding: 9px 13px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+      white-space: nowrap; font-family: inherit;
+    }
+    .compose-row { display: flex; gap: 8px; align-items: flex-end; }
+    .compose-input {
+      flex: 1; min-width: 0; border: 1.5px solid #e2e8f0; border-radius: 18px; padding: 11px 14px;
+      font-size: 16px; /* 16px stops iOS zooming on focus */ font-family: inherit; outline: none; resize: none;
+      max-height: 120px; line-height: 1.3;
+    }
+    .compose-input:focus { border-color: var(--brand-blue); }
+    .composer.note .compose-input:focus { border-color: #eab308; }
+    .btn-send {
+      flex-shrink: 0; height: 46px; padding: 0 16px; border-radius: 23px; border: none;
+      background: var(--brand-blue); color: #fff; font-size: 14px; font-weight: 800; cursor: pointer; font-family: inherit;
+    }
+    .composer.note .btn-send { background: #a16207; }
+    .btn-send:disabled { background: #9aa0a6; cursor: not-allowed; }
+    .compose-hint { font-size: 11.5px; color: #9aa0a6; margin-top: 7px; }
+
+    .finish-card .btn-complete {
+      width: 100%; padding: 16px; border: none; border-radius: 12px; font-size: 14px; font-weight: 800;
+      cursor: pointer; background: #f1f3f5; color: #15161a; font-family: inherit;
+    }
+    .finish-card .btn-complete:active { background: #e4e6ea; }
+    .finish-card .hint { font-size: 12px; color: #6c757d; margin-bottom: 10px; }
+
+    /* --- Open in Maps sheet ------------------------------------------------------ */
+    .nav-dest { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; }
+    .nav-dest .k { font-size: 10.5px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: #6c757d; }
+    .nav-dest .n { font-size: 16px; font-weight: 800; color: #15161a; overflow-wrap: anywhere; }
+    .nav-dest .a { font-size: 13px; color: #6c757d; overflow-wrap: anywhere; }
+    .notice {
+      margin-top: 16px; background: #fff8e6; border-radius: 12px; padding: 12px 14px;
+      box-shadow: inset 0 0 0 1.5px #f5d48a; color: #4a3b0b; font-size: 14px; line-height: 1.45; font-weight: 600;
+      display: flex; gap: 10px;
+    }
+    .notice svg { width: 22px; height: 22px; flex-shrink: 0; color: #b45309; margin-top: 1px; }
+    .ack {
+      display: flex; gap: 12px; align-items: flex-start; margin-top: 12px; padding: 12px 14px;
+      border-radius: 12px; background: #f6f7f9; cursor: pointer; font-size: 14px; color: #15161a; font-weight: 600; line-height: 1.4;
+    }
+    .ack input { width: 24px; height: 24px; flex-shrink: 0; accent-color: var(--brand-blue); margin-top: 1px; }
+    .ack.on-file { background: #f0fdf4; color: #166534; font-size: 12.5px; cursor: default; }
+    .nav-apps { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+    .btn-app {
+      display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; min-height: 56px;
+      border: 1.5px solid #dde2e8; border-radius: 14px; background: #fff; color: #15161a;
+      font-size: 16px; font-weight: 800; cursor: pointer; font-family: inherit; text-align: left;
+    }
+    .btn-app:active { background: #f4f6f8; }
+    .btn-app:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-app .glyph { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 15px; font-weight: 900; flex-shrink: 0; }
+    .btn-app .glyph.apple { background: linear-gradient(135deg, #34c759, #0a84ff); }
+    .btn-app .glyph.google { background: #fff; box-shadow: inset 0 0 0 1.5px #dde2e8; color: #1a73e8; }
+    .btn-app .glyph.waze { background: #33ccff; color: #0b2a3a; }
+    .btn-app .go { margin-left: auto; color: #9aa0a6; }
+    .nav-none { margin-top: 14px; font-size: 13px; color: #6c757d; font-weight: 600; }
+
+    .toast {
+      position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translate(-50%, 24px);
+      opacity: 0; visibility: hidden; transition: transform 0.22s ease, opacity 0.22s ease, visibility 0s linear 0.22s;
+      z-index: 3800; background: #15161a; color: #fff; border-radius: 14px; padding: 12px 14px 12px 16px;
+      display: flex; align-items: center; gap: 14px; font-size: 14px; font-weight: 700;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35); width: max-content; max-width: calc(100vw - 24px);
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+    .toast.show { transform: translate(-50%, 0); opacity: 1; visibility: visible; transition: transform 0.22s ease, opacity 0.22s ease; }
+    .toast button {
+      background: rgba(255,255,255,0.14); color: #fff; border: none; border-radius: 9px; padding: 9px 13px;
+      font-size: 13px; font-weight: 800; cursor: pointer; font-family: inherit; white-space: nowrap;
+    }
+
+    .history-open {
+      background: none; border: none; color: var(--brand-blue-light); font-size: 12px; font-weight: 700;
+      padding: 8px 0 0; margin-right: 14px; cursor: pointer; font-family: inherit;
+    }
+
+    .history-toggle {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.4);
+      font-size: 12px;
+      text-decoration: underline;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .history-list { width: 100%; max-width: 400px; display: none; }
+    .history-list.open { display: block; }
+    .history-item {
+      background: rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.75);
+    }
+    .history-item .addr { font-weight: 700; color: #fff; margin-bottom: 2px; }
+    .history-item .meta { color: rgba(255,255,255,0.4); }
+    .history-item .status-cancelled { color: #f87171; }
+
+    /* Trip breakdown. A bulk-haul job is a shuttle, not a trip: the driver
+       runs the same two points all day. One "on job: 9h" line tells them
+       nothing, so each run gets its own row with its own average speed. */
+    .legs-toggle {
+      background: none;
+      border: none;
+      color: var(--brand-blue-light);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 0 0;
+      cursor: pointer;
+    }
+    .legs-body { display: none; margin-top: 10px; }
+    .legs-body.open { display: block; }
+    .legs-summary {
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0.3px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      margin-bottom: 8px;
+    }
+    .leg-row {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      padding: 6px 0;
+      font-size: 12px;
+      border-left: 2px solid rgba(255,255,255,0.12);
+      padding-left: 10px;
+      margin-left: 2px;
+    }
+    .leg-row.drive { border-left-color: var(--brand-blue-line); }
+    .leg-row.stop { border-left-color: var(--stop-neutral); }
+    .leg-row.stop.long { border-left-color: var(--stop-long); }
+    .leg-row.stop.very-long { border-left-color: var(--stop-very-long); }
+    .leg-row.gap { border-left-color: transparent; border-left-style: dashed; border-left-color: rgba(255,255,255,0.25); }
+    .leg-row .when { color: rgba(255,255,255,0.35); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .leg-row .what { flex: 1; min-width: 0; color: rgba(255,255,255,0.85); }
+    .leg-row .what .sub { display: block; color: rgba(255,255,255,0.4); font-size: 11px; }
+    .leg-row .speed { flex-shrink: 0; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; }
+    .leg-row.stop .speed { color: rgba(255,255,255,0.45); font-weight: 700; }
+
+    /* Loads the office logged from the driver's calls (read-only, white job card) */
+    .called-in { margin: 10px 0 2px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .called-in .ci-t { width: 100%; font-size: 10.5px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: #6c757d; }
+    .called-in .ci { font-size: 12px; font-weight: 700; padding: 4px 9px; border-radius: 8px; font-variant-numeric: tabular-nums; }
+    .called-in .ci.loaded { background: #fff7ed; color: #92400e; border: 1px solid #fcd9a8; }
+    .called-in .ci.dumped { background: #eef4ff; color: var(--brand-blue); border: 1px solid #cfe0ff; }
+    .trip-table td .sub { display: block; font-size: 9px; font-weight: 600; color: rgba(255,255,255,0.35); }
+    .trip-table tr.trip-note .call { color: #4ade80; font-weight: 700; }
+
+    /* Round trips (shared markup from TruckLegs.tripTableHtml), dark card */
+    .trips { margin: 2px 0 14px; }
+    .trips-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .trips-head .t { font-size: 10.5px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: #fff; white-space: nowrap; }
+    .trips-head .route { font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.5); text-align: right; overflow-wrap: anywhere; }
+    .trips-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 5px; font-size: 11.5px; color: rgba(255,255,255,0.5); }
+    .trips-stats b { color: #fff; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .trip-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; font-variant-numeric: tabular-nums; table-layout: fixed; }
+    .trip-table th, .trip-table td { padding: 6px 2px; text-align: right; white-space: nowrap; }
+    .trip-table thead th { font-size: 9.5px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: rgba(255,255,255,0.4); border-bottom: 1px solid rgba(255,255,255,0.12); }
+    .trip-table th:first-child, .trip-table td:first-child { text-align: left; width: 17%; }
+    .trip-table tbody th { font-weight: 800; color: #fff; }
+    .trip-table tbody th .at { display: block; font-size: 9.5px; font-weight: 600; color: rgba(255,255,255,0.35); }
+    .trip-table tbody tr { border-top: 1px solid rgba(255,255,255,0.06); }
+    .trip-table td { font-weight: 700; color: rgba(255,255,255,0.9); }
+    .trip-table td.tot { font-weight: 800; color: #fff; }
+    .trip-table td.na { color: rgba(255,255,255,0.25); }
+    .trip-table td.inc { color: #fbbf24; font-weight: 600; }
+    .trip-table td.now { color: var(--brand-blue-light); font-weight: 800; }
+    .trip-table tr.partial th { color: rgba(255,255,255,0.55); }
+    .trip-table tr.trip-note td { text-align: left; white-space: normal; font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.5); padding: 0 2px 7px; border-top: none; }
+    .trip-table tr.trip-note .flag { color: #fbbf24; font-weight: 700; }
+    .trip-table tfoot tr { border-top: 1px solid rgba(255,255,255,0.14); }
+    .trip-table tfoot th { font-size: 9.5px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: rgba(255,255,255,0.45); }
+    .trip-table tfoot td { color: rgba(255,255,255,0.75); }
+    .trip-table tfoot tr.sum td { color: rgba(255,255,255,0.45); font-weight: 600; }
+    .trips-note { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 6px; line-height: 1.45; }
+
+    .btn-track-toggle {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.35);
+      font-size: 12px;
+      text-decoration: underline;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+
+    /* --- Complete-job sheet -------------------------------------------------
+       Replaces a bare confirm(). Completion is irreversible from the driver
+       UI and now also carries an OPTIONAL photo, which a system dialog cannot
+       express. Optional is the whole point: whether a photo is wanted depends
+       on the job, and forcing one just teaches drivers to shoot the cab floor
+       to get past the step. */
+    .sheet-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(10,11,14,0.66);
+      z-index: 3000;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .sheet-overlay.open { display: flex; }
+    .sheet-card {
+      background: #fff;
+      border-radius: 18px 18px 0 0;
+      padding: 22px 20px calc(24px + env(safe-area-inset-bottom));
+      width: 100%;
+      max-width: 460px;
+      max-height: 88vh;
+      overflow-y: auto;
+    }
+    @media (min-width: 480px) {
+      .sheet-overlay { align-items: center; }
+      .sheet-card { border-radius: 16px; }
+    }
+    .sheet-title { font-size: 19px; font-weight: 800; color: #15161a; }
+    .sheet-addr { font-size: 13px; color: #6c757d; margin-top: 4px; overflow-wrap: anywhere; }
+    .sheet-label {
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin: 20px 0 8px;
+    }
+    .sheet-hint { font-size: 12px; color: #9aa0a6; margin-top: -4px; margin-bottom: 8px; }
+    .photo-actions { display: flex; gap: 10px; }
+    .btn-photo {
+      flex: 1;
+      padding: 16px 10px;
+      border: 1.5px dashed #c3c8ce;
+      border-radius: 12px;
+      background: #fafbfc;
+      color: #15161a;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-photo:active { background: #eef1f4; }
+    .photo-preview { margin-top: 4px; }
+    .photo-preview img {
+      width: 100%;
+      max-height: 240px;
+      object-fit: cover;
+      border-radius: 12px;
+      display: block;
+      background: #eef1f4;
+    }
+    .btn-photo-remove {
+      background: none;
+      border: none;
+      color: #b91c1c;
+      font-size: 12.5px;
+      font-weight: 700;
+      padding: 10px 0 0;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .sheet-error {
+      display: none;
+      background: #fef2f2;
+      color: #b91c1c;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 12.5px;
+      font-weight: 600;
+      margin-top: 14px;
+    }
+    .sheet-error.show { display: block; }
+    .sheet-actions { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; }
+    .btn-sheet-primary {
+      width: 100%;
+      padding: 16px;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      background: #15803d;
+      color: #ffffff;
+      font-family: inherit;
+    }
+    .btn-sheet-primary:active { background: #22c55e; }
+    .btn-sheet-primary:disabled { background: #14532d; color: #ffffff; cursor: not-allowed; }
+    .btn-sheet-secondary {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      background: #f4f5f7;
+      color: #15161a;
+      font-family: inherit;
+    }
+    .btn-sheet-secondary:active { background: #e4e6ea; }
+
+    /* Thumbnail in the driver's own job history. */
+    .history-photo {
+      margin-top: 8px;
+      width: 100%;
+      max-height: 140px;
+      object-fit: cover;
+      border-radius: 8px;
+      display: block;
+      cursor: pointer;
+      background: rgba(255,255,255,0.08);
+    }
+
+    /* --- Haul ticket --------------------------------------------------------
+       Replaces the paper book. Deliberately a plain, dense form: this gets
+       filled in at the end of a shift, and every extra flourish is another
+       thing between the driver and being done. */
+    .ticket-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: #f4f5f7;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #15161a;
+    }
+    .ticket-status.done { background: #f0fdf4; color: #166534; }
+    .btn-ticket {
+      width: 100%;
+      padding: 16px;
+      border: 1.5px dashed #c3c8ce;
+      border-radius: 12px;
+      background: #fafbfc;
+      color: #15161a;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-ticket:active { background: #eef1f4; }
+    .btn-ticket-edit {
+      background: none;
+      border: none;
+      color: var(--brand-blue);
+      font-size: 12.5px;
+      font-weight: 800;
+      cursor: pointer;
+      font-family: inherit;
+      flex-shrink: 0;
+    }
+
+    .form-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #f4f5f7;
+      z-index: 3500;
+      flex-direction: column;
+    }
+    .form-overlay.open { display: flex; }
+    .form-head {
+      background: #15161a;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .form-head .t { color: #fff; font-size: 15px; font-weight: 800; }
+    .form-head button {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .form-body { flex: 1; overflow-y: auto; padding: 16px 16px 28px; }
+    .form-letterhead {
+      background: #fff;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+      font-size: 11.5px;
+      color: #6c757d;
+      line-height: 1.5;
+    }
+    .form-letterhead b { color: #15161a; font-size: 13px; display: block; margin-bottom: 2px; }
+    .form-section {
+      background: #fff;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .form-section h3 {
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 12px;
+    }
+    .fg { margin-bottom: 12px; }
+    .fg:last-child { margin-bottom: 0; }
+    .fg label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: #6c757d;
+      margin-bottom: 5px;
+    }
+    .fg input, .fg select, .fg textarea {
+      width: 100%;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 9px;
+      padding: 12px 12px;
+      font-size: 16px; /* 16px stops iOS zooming the page on focus */
+      color: #15161a;
+      background: #fff;
+      font-family: inherit;
+      outline: none;
+    }
+    .fg input:focus, .fg select:focus, .fg textarea:focus { border-color: var(--brand-blue); }
+    .fg textarea { min-height: 64px; resize: vertical; }
+    .fg-row { display: flex; gap: 10px; }
+    .fg-row .fg { flex: 1; }
+    .fg-readonly input { background: #f4f5f7; color: #6c757d; }
+    .form-total {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      background: #15161a;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .form-total .k { color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; }
+    .form-total .v { color: #fff; font-size: 22px; font-weight: 800; }
+    .btn-form-save {
+      width: 100%;
+      padding: 17px;
+      border: none;
+      border-radius: 12px;
+      background: #15803d;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-form-save:active { background: #22c55e; }
+
+    /* Ticket as shown back in the driver's job history. */
+    .ticket-card {
+      background: rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.75);
+    }
+    .ticket-card .no { font-weight: 800; color: #fff; }
+
+    .lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 4000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: rgba(255,255,255,0.35);
+      width: 100%;
+      max-width: 400px;
+      padding: 0 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===================== HOME: where I am + my jobs ===================== -->
+  <div id="homeView">
+    <div class="header">
+      <div class="header-left">
+        <img src="logo.png" alt="Cooney's" class="header-img" width="51" height="34">
+        <span class="unit-badge" id="unitBadge">UNIT —</span>
+      </div>
+      <button class="btn-signout" onclick="signOut()">Sign Out</button>
+    </div>
+
+    <div class="main">
+      <section class="map-card" aria-label="Your position">
+        <div id="homeMap" class="map map-home" role="img" aria-label="Map of your truck and your job stops"></div>
+        <div class="map-fallback" id="homeMapFallback" hidden>Map needs a connection. Your jobs are below.</div>
+        <div class="map-chip" id="statusRing"><span class="dot"></span><span id="statusLabel">Starting...</span></div>
+        <button class="map-btn" id="homeRecenter" type="button" aria-label="Show me and my stops">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        </button>
+        <div class="map-foot"><span>Driver: <b id="infoName">—</b></span><span id="infoLastSent">—</span></div>
+      </section>
+
+      <div class="offline-note" id="offlineNote">Offline — showing your last known jobs, retrying...</div>
+      <button class="outbox-chip" id="outboxChipHome" type="button"></button>
+      <div class="section-title" id="jobCount">Your jobs</div>
+      <div class="dispatch-list" id="dispatchList">
+        <div class="card">
+          <div class="card-title">Current Dispatch</div>
+          <div class="dispatch-empty">Loading...</div>
+        </div>
+      </div>
+
+      <button class="btn-track-toggle" id="trackToggle" onclick="toggleTracking()">Pause GPS tracking</button>
+      <button class="history-toggle" id="historyToggle" onclick="toggleHistory()">View recent jobs</button>
+      <div class="history-list" id="historyList"></div>
+    </div>
+  </div>
+
+  <!-- ===================== JOB: one job, everything in one place ===================== -->
+  <div id="jobView">
+    <header class="job-bar">
+      <button class="btn-back" id="btnBack" type="button" aria-label="Back to my jobs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>Jobs
+      </button>
+      <div class="jb-title"><span class="t" id="jobTitle">Job</span><span class="s" id="jobSub"></span></div>
+      <span class="pill" id="jobPill"></span>
+    </header>
+
+    <div class="job-scroll">
+      <div class="offline-note" id="offlineNoteJob"></div>
+      <button class="outbox-chip" id="outboxChipJob" type="button"></button>
+
+      <section class="map-card" aria-label="Map of this job">
+        <div id="jobMap" class="map map-job" role="img" aria-label="Map of your truck and this job's stops"></div>
+        <div class="map-fallback" id="jobMapFallback" hidden>Map needs a connection. Stops and Open in Maps still work.</div>
+        <div class="map-chip" id="statusChipJob"><span class="dot"></span><span id="statusLabelJob">Starting...</span></div>
+        <button class="map-btn" id="jobRecenter" type="button" aria-label="Show me and this job's stops">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        </button>
+        <div class="map-foot">
+          <span class="legend"><span><i class="l-me"></i>You</span><span id="legendPickup"><i class="l-p"></i>Pickup</span><span><i class="l-d"></i>Drop-off</span></span>
+          <span id="jobLastSent"></span>
+        </div>
+      </section>
+
+      <section class="card accept-card" id="acceptCard" hidden>
+        <p>New job from dispatch. Accept it to start logging loads.</p>
+        <button class="btn-accept" type="button" id="btnAcceptJob">Accept Job</button>
+      </section>
+
+      <section class="card" id="stopsCard"></section>
+
+      <section class="card" id="loadCard" hidden>
+        <div class="load-head"><span class="t">Loads</span><span class="load-count" id="loadCount"></span></div>
+        <div class="load-btns">
+          <button class="btn-load loaded" type="button" data-load="loaded" aria-label="Loaded: tell dispatch you are loaded">
+            <svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"><path d="M3 22h20V12H3z"/><path d="M23 16h5l4 4v2h-9"/><circle cx="9" cy="26" r="3"/><circle cx="26" cy="26" r="3"/><path d="M5 12l3-4h4l2-3h3l3 3 3 4" fill="currentColor" fill-opacity="0.35"/></svg>
+            <span class="big">Loaded</span><span class="small">Truck is full</span>
+          </button>
+          <button class="btn-load unloaded" type="button" data-load="dumped" aria-label="Unloaded: tell dispatch you are empty">
+            <svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"><path d="M3 22h20V12H3z"/><path d="M23 16h5l4 4v2h-9"/><circle cx="9" cy="26" r="3"/><circle cx="26" cy="26" r="3"/><path d="M13 3v6M10 6l3 3 3-3"/></svg>
+            <span class="big">Unloaded</span><span class="small">Truck is empty</span>
+          </button>
+        </div>
+        <div class="load-last" id="loadLast"></div>
+      </section>
+
+      <section class="card" id="threadCard">
+        <div class="thread-head"><span class="t">Dispatch</span><span class="s">Messages, notes and loads</span></div>
+        <div class="thread" id="thread" role="log" aria-label="Messages with dispatch"></div>
+        <div class="composer" id="composer">
+          <div class="seg" role="tablist" aria-label="Message or note">
+            <button type="button" data-mode="message" class="on" role="tab" aria-selected="true">Message</button>
+            <button type="button" data-mode="note" role="tab" aria-selected="false">Note</button>
+          </div>
+          <div class="quick-replies" id="quickReplies"></div>
+          <div class="compose-row">
+            <textarea id="composeInput" class="compose-input" rows="1" maxlength="1000" placeholder="Message dispatch" aria-label="Message to dispatch"></textarea>
+            <button class="btn-send" type="button" id="btnSend">Send</button>
+          </div>
+          <div class="compose-hint" id="composeHint">Dispatch gets a notification.</div>
+        </div>
+      </section>
+
+      <section class="card finish-card" id="finishCard" hidden>
+        <div class="hint">Finished this job? You can add a haul ticket and a photo next.</div>
+        <button class="btn-complete" type="button" id="btnComplete">Mark Job Complete</button>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===================== Open in Maps (route-responsibility notice first) ===================== -->
+  <div class="sheet-overlay" id="navSheet" role="dialog" aria-modal="true" aria-labelledby="navTitle">
+    <div class="sheet-card">
+      <div class="sheet-title" id="navTitle">Open in your maps app</div>
+      <div class="nav-dest" id="navDest"></div>
+      <div class="notice" id="navNotice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17.5v.01"/></svg>
+        <span id="navNoticeText"></span>
+      </div>
+      <label class="ack" id="navAckRow"><input type="checkbox" id="navAck"><span id="navAckText"></span></label>
+      <div class="nav-apps" id="navApps"></div>
+      <div class="nav-none" id="navNone" hidden>No maps app found on this phone. Copy the address and paste it into the map app you use.</div>
+      <div class="sheet-actions">
+        <button class="btn-sheet-secondary" type="button" id="navCopy">Copy address</button>
+        <button class="btn-sheet-secondary" type="button" id="navCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastText"></span><button type="button" id="toastBtn" hidden></button></div>
+
+  <div class="sheet-overlay" id="completeSheet">
+    <div class="sheet-card">
+      <div class="sheet-title">Mark job complete?</div>
+      <div class="sheet-addr" id="sheetAddr"></div>
+
+      <div class="sheet-label">Haul ticket</div>
+      <div id="ticketSlot">
+        <button class="btn-ticket" type="button" id="btnFillTicket">Fill Out Haul Ticket</button>
+      </div>
+
+      <div class="sheet-label">Photo — optional</div>
+      <div class="sheet-hint">Load, site, or ticket. Skip it if the job doesn't need one.</div>
+      <div class="photo-actions" id="photoActions">
+        <button class="btn-photo" type="button" id="btnTakePhoto">Take Photo</button>
+        <button class="btn-photo" type="button" id="btnPickPhoto">Choose Photo</button>
+      </div>
+      <div class="photo-preview" id="photoPreview" style="display:none;">
+        <img id="photoImg" alt="Photo you attached to this job">
+        <button class="btn-photo-remove" type="button" id="btnRemovePhoto">Remove photo</button>
+      </div>
+
+      <div class="sheet-error" id="sheetError"></div>
+
+      <div class="sheet-actions">
+        <button class="btn-sheet-primary" type="button" id="btnConfirmComplete">Mark Job Complete</button>
+        <button class="btn-sheet-secondary" type="button" id="btnCancelComplete">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Browser fallback only. The native build goes through @capacitor/camera;
+       these keep the web app usable for testing and for a dispatcher spot-check. -->
+  <input type="file" accept="image/*" capture="environment" id="fileCamera" style="display:none;">
+  <input type="file" accept="image/*" id="filePicker" style="display:none;">
+
+  <div class="form-overlay" id="ticketForm">
+    <div class="form-head">
+      <span class="t">Haul Ticket</span>
+      <button type="button" id="btnTicketClose">Cancel</button>
+    </div>
+    <div class="form-body">
+      <div class="form-letterhead" id="ticketLetterhead"></div>
+
+      <div class="form-section">
+        <h3>Job</h3>
+        <div class="fg">
+          <label for="tkDate">Date</label>
+          <input type="date" id="tkDate">
+        </div>
+        <div class="fg">
+          <label for="tkCustomer">Customer</label>
+          <input type="text" id="tkCustomer" autocomplete="off">
+        </div>
+        <div class="fg">
+          <label for="tkJobNo">Job #</label>
+          <input type="text" id="tkJobNo" autocomplete="off">
+        </div>
+        <div class="fg">
+          <label for="tkAddress">Address</label>
+          <input type="text" id="tkAddress" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Driver &amp; Equipment</h3>
+        <div class="fg-row">
+          <div class="fg fg-readonly">
+            <label for="tkDriver">Driver</label>
+            <input type="text" id="tkDriver" readonly>
+          </div>
+          <div class="fg">
+            <label for="tkTruck">Truck #</label>
+            <input type="text" id="tkTruck" autocomplete="off">
+          </div>
+        </div>
+        <div class="fg">
+          <label for="tkEquipment">Equipment</label>
+          <select id="tkEquipment"></select>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Work</h3>
+        <div class="fg">
+          <label for="tkDescription">Description of Work</label>
+          <textarea id="tkDescription" placeholder="e.g. Hourly haul - gravel from Burnco to site"></textarea>
+        </div>
+        <div class="fg">
+          <label for="tkAmount">Amount ($)</label>
+          <input type="text" inputmode="decimal" id="tkAmount" placeholder="0.00">
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Time</h3>
+        <div class="fg-row">
+          <div class="fg">
+            <label for="tkStart">Start Time</label>
+            <input type="time" id="tkStart">
+          </div>
+          <div class="fg">
+            <label for="tkFinish">Finish Time</label>
+            <input type="time" id="tkFinish">
+          </div>
+        </div>
+        <div class="fg-row">
+          <div class="fg">
+            <label for="tkHours">Total Hours</label>
+            <input type="text" inputmode="decimal" id="tkHours" placeholder="0.00">
+          </div>
+          <div class="fg">
+            <label for="tkLoads">Loads</label>
+            <input type="text" inputmode="numeric" id="tkLoads" placeholder="0">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Notes &amp; Approval</h3>
+        <div class="fg">
+          <label for="tkMaterial">Material Notes</label>
+          <textarea id="tkMaterial" placeholder="Material, pit, anything the office needs"></textarea>
+        </div>
+        <div class="fg">
+          <label for="tkApproval">Customer Approval (name)</label>
+          <input type="text" id="tkApproval" autocomplete="off" placeholder="Name of who signed off on site">
+        </div>
+      </div>
+
+      <div class="form-total">
+        <span class="k">Amount</span>
+        <span class="v" id="tkTotalView">$0.00</span>
+      </div>
+
+      <button class="btn-form-save" type="button" id="btnTicketSave">Save Ticket</button>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lightbox"><img id="lightboxImg" alt="Job photo, full size"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" async onload="window.onLeaflet && window.onLeaflet(true)" onerror="window.onLeaflet && window.onLeaflet(false)"></script>
+  <script src="config.js"></script>
+  <script src="legs.js"></script>
+  <script src="stops.js"></script>
+  <script src="jobkit.js"></script>
+  <script>
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
+    const capPlatform = isNative && window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : 'web'
+    const plugins = isNative && window.Capacitor.Plugins ? window.Capacitor.Plugins : {}
+    const BackgroundGeolocation = isNative ? plugins.BackgroundGeolocation : null
+    const PushNotifications = isNative ? plugins.PushNotifications : null
+    // Open in Maps (0013): can this iPhone open Google Maps / Waze / Apple Maps?
+    // Needs LSApplicationQueriesSchemes in Info.plist, so only builds 7+ have it.
+    const AppLauncher = isNative ? plugins.AppLauncher || null : null
+    const CapApp = isNative ? plugins.App || null : null
+    let currentUser = null
+    let historyLoaded = false
+    let historyById = {}
+    let myProfile = {}
+    let tracking = false
+    let watchId = null
+    let bgWatcherId = null
+    let heartbeatTimer = null
+    let wakeLock = null
+    let lastPosition = null
+
+    // --- Parked heartbeat ---------------------------------------------------
+    // distanceFilter is metres-based, so a parked truck used to write NOTHING:
+    // the app went completely silent for the whole time it was sitting at a
+    // pit, a site, or wherever the driver decided to sit. That silence is
+    // indistinguishable from a dead phone, and it made per-leg times and idle
+    // detection impossible. So while the watcher is quiet we re-log the LAST
+    // KNOWN fix on a timer — presence, not a fresh (expensive) GPS lock.
+    const HEARTBEAT_MS = 90 * 1000       // how often a parked truck reports in
+    const HEARTBEAT_TICK_MS = 30 * 1000  // how often we check whether one is due
+    const BROWSER_MIN_MOVE_M = 40        // mirrors the native distanceFilter
+    const PARKED_NOTICE_MS = 10 * 60 * 1000 // matches the server-side idle alert
+    const PARKED_RADIUS_M = 150             // ...and its dwell radius
+    let lastFix = null        // newest known coordinates, movement or heartbeat
+    let lastSentAt = 0        // when we last wrote a row
+    let lastSentFix = null    // the coordinates of that row
+    let parkedAnchor = null   // where the truck settled
+    let parkedSince = 0       // ...and when
+    // ALL open jobs, not just the newest — a second dispatch must never hide the
+    // first.
+    let activeDispatches = []
+    // Monotonic guard: realtime, the 30s poll and post-action reloads can all be
+    // in flight at once, and a slow earlier response must not overwrite a newer one.
+    let loadSeq = 0
+    let dispatchChannel = null
+    let lastRenderSig = ''
+    let hasRenderedOnce = false
+    // The APNs token THIS install registered. Sign-out only ever clears its own
+    // device's token — a browser or Android session must not wipe the token an
+    // iPhone registered, because the iPhone only rewrites it on app launch.
+    let myPushToken = null
+
+    // --- Job screen (0013) -----------------------------------------------------
+    // Accepting a job lands the driver IN the job: map of where they are and the
+    // stops, Open in Maps, Loaded / Unloaded, notes, and the dispatch thread.
+    let openJobId = null      // the job on screen, or null on the home screen
+    let jobCache = {}         // id -> dispatch row (active, from history, or fetched for a push tap)
+    let threadData = {}       // id -> { messages, events, error }
+    let eventsByDispatch = {} // id -> load events (for the home cards)
+    let latestStaffMsg = {}   // id -> newest dispatch message time (unread badge)
+    let composeMode = 'message'
+    let appVersion = 'web'    // "1.0 (7)" once the native App plugin answers
+    let appBuild = null
+    let notice = JobKit.resolveNotice(null, NAV_NOTICE)
+    let outbox = null
+    let lastLoadTap = null
+    let jobPushed = false     // true only when WE pushed the #job entry (so Back can pop it)
+    const QUICK_REPLIES = ['On my way', 'Delayed 15 min', 'Arrived on site', 'Need more info']
+    const LOAD_UNDO_MS = 5000
+
+    function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    const $ = id => document.getElementById(id)
+    function clock(ms) {
+      if (ms == null) return ''
+      const t = new Date(ms), now = new Date()
+      const hm = t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      return t.toDateString() === now.toDateString() ? hm : t.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + hm
+    }
+    const kindLabel = k => k === 'dumped' ? 'Unloaded' : 'Loaded'
+
+    // Same check as dashboard.html (keep the two in step): the server says who is
+    // in the pilot; the last answer is cached for a launch with no signal.
+    function pilotCheck(uid) {
+      const key = 'tt_pilot|' + uid
+      const cached = () => { try { const v = localStorage.getItem(key); return v === '1' ? true : v === '0' ? false : null } catch (e) { return null } }
+      return Promise.race([
+        sb.rpc('driver_ui_pilot').then(r => {
+          if (!r || r.error || typeof r.data !== 'boolean') return cached()
+          try { localStorage.setItem(key, r.data ? '1' : '0') } catch (e) {}
+          return r.data
+        }, () => cached()),
+        new Promise(res => setTimeout(() => res(cached()), 2500))
+      ])
+    }
+
+    sb.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) { window.location.href = 'index.html'; return }
+      currentUser = session.user
+      const pilotP = pilotCheck(currentUser.id)
+      const { data: profile } = await sb.from('profiles').select('full_name, unit_number, role').eq('id', session.user.id).single()
+      if (profile?.role === 'admin' || profile?.role === 'dispatcher') { window.location.href = 'dispatcher.html'; return }
+      // Pilot gate (0014): a driver who is NOT (or no longer) in the pilot goes
+      // back to today's screen. Only an explicit "no" moves them; no signal
+      // keeps a pilot driver here.
+      if ((await Promise.race([pilotP, new Promise(r => setTimeout(() => r(null), 800))])) === false) {
+        window.location.replace('dashboard.html' + window.location.hash)
+        return
+      }
+      myProfile = profile || {}
+      initTicketForm()
+      initOutbox()
+      initAppInfo()
+      loadNotice()
+      initStatusMirror()
+      $('infoName').textContent = profile?.full_name || 'Unknown'
+      $('unitBadge').textContent = 'UNIT ' + (profile?.unit_number || '—')
+      setComposeMode('message')
+      const m = /^#job=([0-9a-f-]{36})$/i.exec(location.hash)
+      if (m) openJob(m[1], { replace: true })
+      loadDispatch()
+      setInterval(loadDispatch, 30000)
+      startTracking()
+      registerPush()
+      subscribeRealtime()
+      setTimeout(updateHomeMap, 0)
+    })
+
+    window.addEventListener('pagehide', () => {
+      if (dispatchChannel) { sb.removeChannel(dispatchChannel); dispatchChannel = null }
+    })
+
+    function setOffline(on, msg) {
+      ;['offlineNote', 'offlineNoteJob'].forEach(id => {
+        const el = $(id)
+        el.textContent = msg || 'Offline — showing your last known jobs, retrying...'
+        el.classList.toggle('show', !!on)
+      })
+    }
+
+    // One channel. RLS limits every table here to this driver's own rows.
+    function subscribeRealtime() {
+      dispatchChannel = sb.channel('driver-' + currentUser.id)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatches', filter: 'driver_id=eq.' + currentUser.id }, (p) => {
+          historyLoaded = false
+          if (p.new && p.new.id && jobCache[p.new.id]) jobCache[p.new.id] = Object.assign({}, jobCache[p.new.id], p.new)
+          loadDispatch()
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_load_events' }, (p) => {
+          const id = (p.new && p.new.dispatch_id) || (p.old && p.old.dispatch_id) || openJobId
+          if (id && id === openJobId) loadThread(id)
+          loadDispatch()
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dispatch_messages' }, (p) => onMessageRow(p.new))
+        .subscribe()
+    }
+
+    function onMessageRow(row) {
+      if (!row || !row.dispatch_id) return
+      const td = threadData[row.dispatch_id]
+      if (td && !td.messages.some(m => m.id === row.id)) td.messages.push(row)
+      if (openJobId === row.dispatch_id) { renderThread(); markSeen(row.dispatch_id); return }
+      if (row.sender_id !== currentUser.id && (row.kind || 'message') === 'message') {
+        latestStaffMsg[row.dispatch_id] = row.created_at
+        renderDispatches(true)
+        showToast('New message from dispatch', 'Open', () => openJob(row.dispatch_id, { thread: true }), 8000)
+      }
+    }
+
+    async function registerPush() {
+      if (!isNative || !PushNotifications) return
+      // Push is iOS-only. The Edge Function speaks APNs, and there is no
+      // google-services.json wired up for FCM — on Android register() throws
+      // inside Firebase init and the catch below would swallow it silently.
+      if (capPlatform !== 'ios') return
+      try {
+        let perm = await PushNotifications.checkPermissions()
+        if (perm.receive !== 'granted') perm = await PushNotifications.requestPermissions()
+        if (perm.receive !== 'granted') return
+
+        PushNotifications.addListener('registration', async (token) => {
+          myPushToken = token.value
+          await sb.from('profiles').update({ push_token: token.value }).eq('id', currentUser.id)
+        })
+        PushNotifications.addListener('registrationError', (err) => {
+          console.error('Push registration error', err)
+        })
+        // App open in front of the driver: never interrupt what they are doing,
+        // just refresh and offer the message.
+        PushNotifications.addListener('pushNotificationReceived', (n) => {
+          const data = n && n.data ? n.data : (n && n.notification && n.notification.data)
+          if (data && data.type === 'message' && data.dispatch_id) {
+            if (openJobId === data.dispatch_id) { loadThread(data.dispatch_id); return }
+            loadDispatch()
+            showToast('New message from dispatch', 'Open', () => openJob(data.dispatch_id, { thread: true }), 8000)
+            return
+          }
+          loadDispatch()
+        })
+        // A tapped banner opens THAT job, scrolled to the conversation, ready to
+        // reply. (Before 0013 the thread was marked open in memory but rendered
+        // closed, so the first tap on Messages closed it again: drivers saw the
+        // banner and could not get to the message.)
+        PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+          const data = action && action.notification && action.notification.data
+          const id = data ? data.dispatch_id : null
+          if (id) openJob(id, { thread: data.type === 'message' })
+          else loadDispatch()
+        })
+
+        await PushNotifications.register()
+      } catch (e) {
+        console.error('Could not set up push notifications', e)
+      }
+    }
+
+    async function initAppInfo() {
+      if (!CapApp || !CapApp.getInfo) return
+      try {
+        const i = await CapApp.getInfo()
+        appBuild = String(i.build || '')
+        appVersion = (i.version || '?') + ' (' + (i.build || '?') + ')'
+      } catch (e) {}
+      if (CapApp.addListener) {
+        try { CapApp.addListener('resume', () => { if (outbox) outbox.flush({ force: true }); loadDispatch() }) } catch (e) {}
+      }
+    }
+
+    // Server copy of the route-responsibility notice wins (so the wording can
+    // change without a rebuild); the last good server copy is cached for a
+    // launch with no signal; config.js is the fallback of last resort.
+    async function loadNotice() {
+      try { notice = JobKit.resolveNotice(JSON.parse(localStorage.getItem('tt_nav_notice') || 'null'), NAV_NOTICE) || notice } catch (e) {}
+      const { data, error } = await sb.from('app_settings').select('value').eq('key', 'nav_notice').maybeSingle()
+      if (error || !data || !data.value) return
+      const r = JobKit.resolveNotice(data.value, NAV_NOTICE)
+      if (r && r.source === 'server') {
+        notice = r
+        try { localStorage.setItem('tt_nav_notice', JSON.stringify(data.value)) } catch (e) {}
+      }
+    }
+
+    // The GPS status lives in one chip (#statusRing, driven by the tracking code
+    // below); the job screen shows a copy of it.
+    function initStatusMirror() {
+      const src = $('statusRing'), label = $('statusLabel'), sent = $('infoLastSent')
+      const copy = () => {
+        $('statusChipJob').className = src.className
+        $('statusLabelJob').textContent = label.textContent
+        $('jobLastSent').textContent = sent.textContent === '—' ? '' : sent.textContent
+      }
+      new MutationObserver(copy).observe(src, { attributes: true, childList: true, subtree: true, characterData: true })
+      new MutationObserver(copy).observe(sent, { childList: true, subtree: true, characterData: true })
+      copy()
+    }
+
+    // --- Loading ----------------------------------------------------------------
+    async function loadDispatch() {
+      if (!currentUser) return
+      const seq = ++loadSeq
+      const { data, error } = await sb.from('dispatches')
+        .select('*')
+        .eq('driver_id', currentUser.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(20)
+
+      // A newer load already rendered — discard this stale response.
+      if (seq !== loadSeq) return
+
+      // supabase-js RESOLVES with {data:null, error} on a network failure rather
+      // than throwing. Rendering that as "no dispatch" would wipe a real job off
+      // the screen of a driver in a dead zone, so keep the last known state.
+      if (error) {
+        setOffline(true)
+        if (!hasRenderedOnce) {
+          $('dispatchList').innerHTML =
+            '<div class="card"><div class="card-title">Current Dispatch</div><div class="dispatch-empty">No connection — retrying every 30s.</div></div>'
+        }
+        return
+      }
+
+      setOffline(false)
+      activeDispatches = data || []
+      activeDispatches.forEach(d => { jobCache[d.id] = d })
+      await loadSummaries(seq)
+      if (seq !== loadSeq) return
+      renderDispatches()
+      if (openJobId) {
+        if (!activeDispatches.some(d => d.id === openJobId)) await fetchJob(openJobId)
+        renderJobView()
+      }
+      if (outbox) outbox.flush({ force: true })   // that query worked, so there is signal: send now
+    }
+
+    // Load events (counts on the cards) and the newest dispatch message per job
+    // (unread badge), for all open jobs in two queries.
+    async function loadSummaries(seq) {
+      const ids = activeDispatches.map(d => d.id)
+      if (!ids.length) { eventsByDispatch = {}; return }
+      const [ev, msg] = await Promise.all([
+        sb.from('dispatch_load_events').select('id, dispatch_id, kind, event_at, note, source, driver_id')
+          .in('dispatch_id', ids).order('event_at', { ascending: true }),
+        sb.from('dispatch_messages').select('dispatch_id, created_at, sender_id, kind')
+          .in('dispatch_id', ids).neq('sender_id', currentUser.id).order('created_at', { ascending: false }).limit(100)
+      ])
+      if (seq !== loadSeq) return
+      if (!ev.error) {
+        const map = {}
+        ;(ev.data || []).forEach(e => { (map[e.dispatch_id] = map[e.dispatch_id] || []).push(e) })
+        eventsByDispatch = map
+      }
+      if (!msg.error) {
+        const latest = {}
+        ;(msg.data || []).forEach(m => { if ((m.kind || 'message') === 'message' && !latest[m.dispatch_id]) latest[m.dispatch_id] = m.created_at })
+        latestStaffMsg = latest
+      }
+    }
+
+    async function fetchJob(id) {
+      const { data, error } = await sb.from('dispatches').select('*').eq('id', id).maybeSingle()
+      if (!error) {
+        if (data) jobCache[id] = data
+        else jobCache[id] = jobCache[id] || { id: id, _missing: true }
+      }
+      return jobCache[id] || null
+    }
+
+    // --- Unread -----------------------------------------------------------------
+    function seenMap() { try { return JSON.parse(localStorage.getItem('tt_seen|' + currentUser.id) || '{}') } catch (e) { return {} } }
+    function isUnread(id) {
+      const latest = latestStaffMsg[id]
+      if (!latest) return false
+      const seen = seenMap()[id]
+      return !seen || new Date(latest) > new Date(seen)
+    }
+    function markSeen(id) {
+      const td = threadData[id]
+      const theirs = td ? td.messages.filter(m => m.sender_id !== currentUser.id) : []
+      const newest = theirs.length ? theirs[theirs.length - 1].created_at : latestStaffMsg[id]
+      if (!newest) return
+      const s = seenMap()
+      if (s[id] && new Date(s[id]) >= new Date(newest)) return
+      s[id] = newest
+      try { localStorage.setItem('tt_seen|' + currentUser.id, JSON.stringify(s)) } catch (e) {}
+    }
+
+    // --- Home: job cards ----------------------------------------------------------
+    function summaryFor(d) {
+      const items = JobKit.threadItems({ messages: [], events: eventsByDispatch[d.id] || [], job: d, myId: currentUser.id,
+        pending: outbox ? outbox.pendingFor(d.id) : [] })
+      return JobKit.loadSummary(items, d)
+    }
+
+    // Which stop is the truck heading for. A shuttle alternates: after a Loaded
+    // tap it is the drop-off, after an Unloaded it is the pickup again.
+    function currentStopKind(d, sum) {
+      if (!DispatchStops.hasPickup(d)) return 'dropoff'
+      if (sum.last) return sum.last.kind === 'dumped' ? 'pickup' : 'dropoff'
+      return d.picked_up_at ? 'dropoff' : 'pickup'
+    }
+
+    function renderDispatches(force) {
+      const list = $('dispatchList')
+      const countEl = $('jobCount')
+      const sig = JSON.stringify([activeDispatches.map(d => [d.id, d.accepted_at, d.site_address, d.notes, d.lat, d.lng,
+        d.pickup_name, d.pickup_address, d.pickup_lat, d.pickup_lng, d.picked_up_at, d.pickup_source,
+        (eventsByDispatch[d.id] || []).map(e => [e.id, e.kind, e.event_at]), isUnread(d.id)]),
+        outbox ? outbox.items().map(x => [x.id, x.state]) : []])
+      if (!force && sig === lastRenderSig && hasRenderedOnce) return
+      lastRenderSig = sig
+      hasRenderedOnce = true
+
+      if (activeDispatches.length === 0) {
+        countEl.textContent = 'Your jobs'
+        list.innerHTML = '<div class="card"><div class="dispatch-empty">No jobs right now. New jobs from dispatch show up here.</div></div>'
+        updateHomeMap()
+        return
+      }
+      countEl.textContent = activeDispatches.length === 1 ? 'Your job' : activeDispatches.length + ' open jobs'
+      list.innerHTML = activeDispatches.map((d, i) => jobCardHtml(d, i)).join('')
+      updateHomeMap()
+    }
+
+    function jobCardHtml(d, i) {
+      const id = escapeHtml(d.id)
+      const accepted = !!d.accepted_at
+      const sum = summaryFor(d)
+      const twoStop = DispatchStops.hasPickup(d)
+      const next = currentStopKind(d, sum)
+      const pill = !accepted ? '<span class="pill pending">New job</span>'
+        : (sum.last && sum.last.kind === 'loaded' ? '<span class="pill loaded">Loaded</span>' : '<span class="pill accepted">Accepted</span>')
+      const unread = isUnread(d.id) ? '<span class="pill unread">New message</span>' : ''
+      const route = twoStop
+        ? `<div class="jc-address">${escapeHtml(DispatchStops.pickupLabel(d))} <span style="color:#9aa0a6">→</span> ${escapeHtml(DispatchStops.shortAddress(d.site_address))}</div>`
+        : `<div class="jc-address">${escapeHtml(d.site_address)}</div>`
+      const loads = accepted && (sum.loads || sum.unloads)
+        ? `<div class="jc-loads">${sum.loads} loaded · ${sum.unloads} unloaded · last ${kindLabel(sum.last.kind)} ${escapeHtml(clock(sum.last.at))}</div>`
+        : (accepted && twoStop ? `<div class="jc-loads">Next: ${next === 'pickup' ? 'pickup' : 'drop-off'}</div>` : '')
+      const actions = accepted
+        ? `<button class="btn-open" data-open="${id}">Open Job <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>`
+        : `<button class="btn-accept" data-accept="${id}">Accept Job</button><button class="btn-details" data-open="${id}">Details</button>`
+      return `
+        <article class="card job-card ${accepted ? 'accepted' : 'pending'}" data-dispatch="${id}">
+          <div class="jc-top">${pill}<span class="jc-when">${activeDispatches.length > 1 ? 'Job ' + (i + 1) + ' · ' : ''}Sent ${escapeHtml(clock(new Date(d.created_at).getTime()))}</span>${unread}</div>
+          ${route}
+          ${d.notes ? `<div class="jc-notes">${escapeHtml(d.notes)}</div>` : ''}
+          ${loads}
+          <div class="jc-actions">${actions}</div>
+        </article>`
+    }
+
+    $('dispatchList').addEventListener('click', (e) => {
+      const acc = e.target.closest('button[data-accept]')
+      if (acc) { acceptDispatch(acc.dataset.accept, acc); return }
+      const op = e.target.closest('[data-open]')
+      if (op) openJob(op.dataset.open)
+    })
+
+    async function acceptDispatch(id, btn) {
+      if (!jobCache[id]) return
+      if (btn) { btn.disabled = true; btn.textContent = 'Accepting...' }
+      const { error } = await sb.from('dispatches')
+        .update({ accepted_at: new Date().toISOString() })
+        .eq('id', id)
+      if (error) {
+        if (btn) { btn.disabled = false; btn.textContent = btn.id === 'btnAcceptJob' ? 'Accept Job' : 'Accept Job' }
+        setOffline(true, 'Could not accept — no connection. Try again when you have signal.')
+        return
+      }
+      setOffline(false)
+      const now = new Date().toISOString()
+      if (jobCache[id]) jobCache[id].accepted_at = jobCache[id].accepted_at || now
+      const a = activeDispatches.find(x => x.id === id)
+      if (a) a.accepted_at = a.accepted_at || now
+      // Accept takes the driver straight into the job.
+      if (openJobId === id) renderJobView()
+      else openJob(id)
+      renderDispatches(true)
+      loadDispatch()
+    }
+
+    // --- Job screen -----------------------------------------------------------------
+    function openJob(id, opts) {
+      opts = opts || {}
+      if (!id) return
+      openJobId = id
+      const hash = '#job=' + id
+      try {
+        if (location.hash !== hash) {
+          if (opts.replace || document.body.classList.contains('view-job')) history.replaceState({ job: id }, '', hash)
+          else { history.pushState({ job: id }, '', hash); jobPushed = true }
+        }
+      } catch (e) {}
+      document.body.classList.add('view-job')
+      window.scrollTo(0, 0)
+      setComposeMode('message')
+      renderJobView()
+      setTimeout(() => { ensureJobMap(); updateJobMap(true) }, 0)
+      const ready = jobCache[id] ? Promise.resolve() : fetchJob(id).then(() => { if (openJobId === id) renderJobView() })
+      Promise.all([ready, loadThread(id)]).then(() => {
+        if (openJobId !== id) return
+        if (opts.thread) {
+          $('threadCard').scrollIntoView({ block: 'start', behavior: 'smooth' })
+          const t = $('thread'); t.scrollTop = t.scrollHeight
+        }
+      })
+    }
+
+    function showHome() {
+      openJobId = null
+      document.body.classList.remove('view-job')
+      try { if (location.hash) history.replaceState(null, '', location.pathname + location.search) } catch (e) {}
+      renderDispatches(true)
+      setTimeout(() => { if (homeMap) homeMap.invalidateSize(); updateHomeMap() }, 0)
+    }
+    function closeJob() {
+      if (jobPushed) { jobPushed = false; history.back() }
+      else showHome()
+    }
+    window.addEventListener('popstate', () => {
+      const m = /^#job=([0-9a-f-]{36})$/i.exec(location.hash)
+      if (m) { if (openJobId !== m[1]) openJob(m[1], { replace: true }) }
+      else { jobPushed = false; if (openJobId) showHome() }
+    })
+    $('btnBack').addEventListener('click', closeJob)
+
+    function renderJobView() {
+      const id = openJobId
+      if (!id) return
+      const d = jobCache[id]
+      const show = (elId, on) => { $(elId).hidden = !on }
+      if (!d || d._missing) {
+        $('jobTitle').textContent = d && d._missing ? 'Job not found' : 'Loading job...'
+        $('jobSub').textContent = ''
+        $('jobPill').className = 'pill'; $('jobPill').textContent = ''
+        $('stopsCard').innerHTML = `<div class="dispatch-empty">${d && d._missing ? 'This job is no longer available.' : 'Loading...'}</div>`
+        show('acceptCard', false); show('loadCard', false); show('finishCard', false)
+        return
+      }
+      const active = d.status === 'active'
+      const accepted = !!d.accepted_at
+      const idx = activeDispatches.findIndex(x => x.id === id)
+      // These two buttons are reused for every job: never carry one job's
+      // "Accepting..." / "Marking complete..." state onto the next.
+      if (renderJobView.lastId !== id) {
+        renderJobView.lastId = id
+        $('btnAcceptJob').disabled = false; $('btnAcceptJob').textContent = 'Accept Job'
+        $('btnComplete').disabled = false; $('btnComplete').textContent = 'Mark Job Complete'
+      }
+      $('jobTitle').textContent = DispatchStops.routeText(d) || 'Job'
+      $('jobSub').textContent = 'Sent ' + clock(new Date(d.created_at).getTime()) +
+        (idx >= 0 && activeDispatches.length > 1 ? ' · Job ' + (idx + 1) + ' of ' + activeDispatches.length : '')
+      const pill = $('jobPill')
+      if (!active) { pill.className = 'pill ' + (d.status === 'cancelled' ? 'cancelled' : 'done'); pill.textContent = d.status === 'cancelled' ? 'Cancelled' : 'Completed' }
+      else if (!accepted) { pill.className = 'pill pending'; pill.textContent = 'New' }
+      else { pill.className = 'pill accepted'; pill.textContent = 'Accepted' }
+      show('acceptCard', active && !accepted)
+      show('loadCard', active && accepted)
+      show('finishCard', active && accepted)
+      $('legendPickup').hidden = !DispatchStops.hasPickup(d)
+      $('stopsCard').innerHTML = stopsHtml(d)
+      renderLoadCard()
+      renderThread()
+      updateJobMap(false)
+    }
+
+    function currentItems() {
+      const id = openJobId, d = jobCache[id] || {}
+      const td = threadData[id] || { messages: [], events: eventsByDispatch[id] || [] }
+      return JobKit.threadItems({ messages: td.messages, events: td.events, job: d, myId: currentUser.id,
+        pending: outbox ? outbox.pendingFor(id) : [] })
+    }
+
+    const NAV_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>'
+
+    function stopsHtml(d) {
+      const id = escapeHtml(d.id)
+      const active = d.status === 'active'
+      const sum = JobKit.loadSummary(currentItems(), d)
+      const cur = active ? currentStopKind(d, sum) : null
+      const twoStop = DispatchStops.hasPickup(d)
+      const driverTapped = (threadData[d.id] ? threadData[d.id].events : (eventsByDispatch[d.id] || []))
+        .some(e => e.kind === 'loaded' && e.source === 'driver')
+      const row = (kind, n, label, name, addr, extra) => `
+        <div class="stop ${kind}${cur === kind ? ' current' : ''}">
+          <span class="stop-dot">${n}</span>
+          <div class="stop-body">
+            <div class="stop-kind">${label}${cur === kind ? ' · next' : ''}</div>
+            <div class="stop-name">${escapeHtml(name)}</div>
+            ${addr ? `<div class="stop-addr">${escapeHtml(addr)}</div>` : ''}
+            ${extra || ''}
+            <button class="btn-nav" type="button" data-nav="${kind}" aria-label="Open ${label.toLowerCase()} in your maps app">${NAV_ICON}Open in Maps</button>
+          </div>
+        </div>`
+      let html = '<div class="card-title">Stops</div><div class="stop-list">'
+      if (twoStop) {
+        const pickupName = d.pickup_name ? String(d.pickup_name).trim() : ''
+        let state = ''
+        if (d.picked_up_at) {
+          const how = DispatchStops.sourceText(d.pickup_source)
+          // The stage flag can be wrong (a geofence misfire, an office mis-tap);
+          // the driver can put it back while the job is open. Not offered once
+          // the driver's own Loaded taps are the record.
+          const undo = active && !driverTapped ? ` <button class="undo" data-undo-loaded="${id}">Undo</button>` : ''
+          state = `<div class="stop-state">First load ${escapeHtml(clock(new Date(d.picked_up_at).getTime()))}${how ? ' · ' + escapeHtml(how) : ''}${undo}</div>`
+        }
+        html += row('pickup', '1', 'Pickup', pickupName || d.pickup_address, pickupName ? d.pickup_address : '', state)
+        html += row('dropoff', '2', 'Drop-off', d.site_address, '')
+      } else {
+        html += row('dropoff', '1', 'Job site', d.site_address, '')
+      }
+      html += '</div>'
+      if (d.notes) html += `<div class="job-notes"><b>From dispatch</b>${escapeHtml(d.notes)}</div>`
+      if (!active) html += '<div class="readonly-note" style="margin-top:12px">This job is closed. You can still message dispatch about it below.</div>'
+      return html
+    }
+
+    function renderLoadCard() {
+      const d = jobCache[openJobId]
+      if (!d || d.status !== 'active' || !d.accepted_at) return
+      const sum = JobKit.loadSummary(currentItems(), d)
+      $('loadCount').textContent = sum.loads + ' loaded · ' + sum.unloads + ' unloaded'
+      document.querySelectorAll('#loadCard .btn-load').forEach(b => {
+        b.classList.toggle('quiet', b.dataset.load !== sum.next)
+      })
+      $('loadLast').textContent = sum.last
+        ? 'Last: ' + kindLabel(sum.last.kind) + ' at ' + clock(sum.last.at)
+        : 'Tap Loaded when the truck is full and Unloaded when it is empty. Dispatch sees it right away.'
+    }
+
+    // --- Thread -------------------------------------------------------------------
+    async function loadThread(id) {
+      if (!id) return
+      const [m, e] = await Promise.all([
+        sb.from('dispatch_messages').select('*').eq('dispatch_id', id).order('created_at', { ascending: true }).limit(300),
+        sb.from('dispatch_load_events').select('id, dispatch_id, kind, event_at, note, source, driver_id')
+          .eq('dispatch_id', id).order('event_at', { ascending: true })
+      ])
+      const td = threadData[id] = threadData[id] || { messages: [], events: eventsByDispatch[id] || [] }
+      td.error = !!(m.error || e.error)
+      if (!m.error) td.messages = m.data || []
+      if (!e.error) { td.events = e.data || []; eventsByDispatch[id] = td.events }
+      if (openJobId === id) {
+        renderThread()
+        renderLoadCard()
+        $('stopsCard').innerHTML = jobCache[id] && !jobCache[id]._missing ? stopsHtml(jobCache[id]) : $('stopsCard').innerHTML
+        if (!m.error) { markSeen(id); renderDispatches(true) }
+      }
+    }
+
+    const EV_ICON = {
+      loaded: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M6 12l6-6 6 6"/></svg>',
+      dumped: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v13M6 12l6 6 6-6"/></svg>'
+    }
+
+    function stateHtml(x) {
+      if (x.state === 'failed') {
+        return ` <span class="t-state failed">Not sent.</span><button class="t-act" data-retry="${escapeHtml(x.id)}">Retry</button><button class="t-act" data-discard="${escapeHtml(x.id)}">Discard</button>`
+      }
+      if (x.state === 'pending') {
+        if (x.undoUntil && Date.now() < x.undoUntil) return ` <span class="t-state">Sending...</span><button class="t-act" data-undo="${escapeHtml(x.id)}">Undo</button>`
+        return ` <span class="t-state">${x.error ? 'Waiting for signal' : 'Sending...'}</span>`
+      }
+      return ''
+    }
+
+    function itemHtml(x) {
+      const t = escapeHtml(clock(x.at))
+      if (x.type === 'system') {
+        let s = ''
+        if (x.what === 'sent') s = 'Job sent ' + t
+        else if (x.what === 'accepted') s = 'You accepted · ' + t
+        else if (x.what === 'picked_up') s = 'Marked loaded · ' + t + (x.source === 'geofence' ? ' (auto, left the pickup)' : x.source === 'dispatch' ? ' (by dispatch)' : '')
+        else if (x.what === 'completed') s = 'Job completed · ' + t
+        else if (x.what === 'cancelled') s = 'Job cancelled by dispatch'
+        return `<div class="t-sys">${s}</div>`
+      }
+      if (x.type === 'event') {
+        const who = x.source === 'geofence' ? 'from GPS' : (x.source === 'dispatcher' ? 'logged by dispatch' : (x.mine ? 'you' : 'driver'))
+        return `<div class="t-ev ${x.kind} ${x.state}">${EV_ICON[x.kind] || ''}${kindLabel(x.kind)} ${t}<span class="who">· ${who}</span>${stateHtml(x)}</div>`
+      }
+      if (x.type === 'note') {
+        return `<div class="t-note ${x.state}"><span class="k">Note · ${x.mine ? 'You' : 'Dispatch'}</span>${escapeHtml(x.body)}<div class="meta">${t}${stateHtml(x)}</div></div>`
+      }
+      return `<div class="t-msg ${x.mine ? 'mine' : 'theirs'} ${x.state}">${escapeHtml(x.body)}<div class="meta">${x.mine ? 'You' : 'Dispatch'} · ${t}${stateHtml(x)}</div></div>`
+    }
+
+    function renderThread(toBottom) {
+      const el = $('thread')
+      if (!openJobId) return
+      const td = threadData[openJobId]
+      const items = currentItems()
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+      if (!items.length) {
+        el.innerHTML = td && td.error
+          ? '<div class="t-empty">Could not load the conversation. It will show up when you have signal.</div>'
+          : '<div class="t-empty">No messages yet. Anything you send here goes to dispatch.</div>'
+        return
+      }
+      el.innerHTML = items.map(itemHtml).join('') +
+        (td && td.error ? '<div class="t-sys">Offline — showing what was last loaded.</div>' : '')
+      if (toBottom || nearBottom) el.scrollTop = el.scrollHeight
+    }
+
+    // --- Composer: message (dispatch is notified) or note (for the record) --------
+    function setComposeMode(mode) {
+      composeMode = mode === 'note' ? 'note' : 'message'
+      document.querySelectorAll('#composer .seg button').forEach(b => {
+        const on = b.dataset.mode === composeMode
+        b.classList.toggle('on', on); b.setAttribute('aria-selected', on ? 'true' : 'false')
+      })
+      $('composer').classList.toggle('note', composeMode === 'note')
+      $('composeInput').placeholder = composeMode === 'note' ? 'Add a note to this job' : 'Message dispatch'
+      $('composeInput').setAttribute('aria-label', composeMode === 'note' ? 'Note on this job' : 'Message to dispatch')
+      $('composeHint').textContent = composeMode === 'note'
+        ? 'Saved on the job for dispatch to see. No notification.'
+        : 'Dispatch gets a notification.'
+      $('quickReplies').style.display = composeMode === 'note' ? 'none' : 'flex'
+      $('btnSend').textContent = composeMode === 'note' ? 'Save' : 'Send'
+    }
+    $('quickReplies').innerHTML = QUICK_REPLIES.map(q =>
+      `<button type="button" class="quick-reply-chip" data-quick="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')
+
+    function autosize() {
+      const el = $('composeInput')
+      el.style.height = 'auto'
+      el.style.height = Math.min(120, el.scrollHeight) + 'px'
+    }
+    $('composeInput').addEventListener('input', autosize)
+    $('composeInput').addEventListener('keydown', (e) => {
+      // Enter sends on a keyboard; on a phone the Send button does.
+      if (e.key === 'Enter' && !e.shiftKey && !isNative && window.matchMedia('(pointer: fine)').matches) { e.preventDefault(); sendCompose() }
+    })
+
+    function sendCompose(quickText) {
+      const id = openJobId
+      if (!id || !outbox) return
+      const input = $('composeInput')
+      const body = String(quickText != null ? quickText : input.value).trim()
+      if (!body) return
+      const kind = quickText != null ? 'message' : composeMode
+      // Queued, not fired: with no signal it waits on the phone and says so.
+      outbox.enqueue({ type: 'message', dispatch_id: id, payload: { body: body.slice(0, 1000), kind: kind } })
+      if (quickText == null) { input.value = ''; autosize() }
+      renderThread(true)
+      outbox.flush({ force: true })
+    }
+
+    // --- Loaded / Unloaded ------------------------------------------------------------
+    // One tap, repeatable all day. The tap is held on the phone for 5 s so a
+    // mis-tap can be undone before dispatch ever sees it; after that it is
+    // sent (or queued for signal) and dispatch corrects any mistake.
+    function logLoad(kind) {
+      const d = jobCache[openJobId]
+      if (!d || d.status !== 'active' || !outbox) return
+      const now = Date.now()
+      if (lastLoadTap && lastLoadTap.id === d.id && lastLoadTap.kind === kind && now - lastLoadTap.at < 20000) {
+        showToast(kindLabel(kind) + ' is already logged.', null, null, 2500)
+        return
+      }
+      lastLoadTap = { id: d.id, kind: kind, at: now }
+      const it = outbox.enqueue({ type: 'load_event', dispatch_id: d.id, delayMs: LOAD_UNDO_MS,
+        payload: { kind: kind, event_at: new Date(now).toISOString() } })
+      showToast(kindLabel(kind) + ' at ' + clock(now), 'Undo', () => undoLoad(it.id), LOAD_UNDO_MS)
+      setTimeout(() => { outbox.flush({ force: true }); refreshJobBits() }, LOAD_UNDO_MS + 100)
+      refreshJobBits()
+    }
+    function undoLoad(itemId) {
+      if (outbox.cancel(itemId)) { lastLoadTap = null; showToast('Undone. Nothing was sent.', null, null, 2500) }
+      else showToast('Already sent. Message dispatch to fix it.', null, null, 4000)
+      refreshJobBits()
+    }
+    function refreshJobBits() {
+      if (openJobId) { renderThread(true); renderLoadCard(); const d = jobCache[openJobId]; if (d && !d._missing) $('stopsCard').innerHTML = stopsHtml(d) }
+      renderDispatches(true)
+    }
+
+    async function undoLoaded(id) {
+      if (!confirm('Undo the first "Loaded"? The pickup becomes your next stop again.')) return
+      const { error } = await sb.from('dispatches').update({ picked_up_at: null }).eq('id', id)
+      if (error) { setOffline(true, 'Could not undo — no connection. Try again when you have signal.'); return }
+      setOffline(false)
+      if (jobCache[id]) { jobCache[id].picked_up_at = null; jobCache[id].pickup_source = 'undone' }
+      renderJobView()
+      loadDispatch()
+    }
+
+    // Everything on the job screen goes through one delegated handler.
+    $('jobView').addEventListener('click', (e) => {
+      const b = e.target.closest('button')
+      if (!b) return
+      if (b.dataset.nav) return openNavSheet(b.dataset.nav)
+      if (b.dataset.load) return logLoad(b.dataset.load)
+      if (b.dataset.undo) return undoLoad(b.dataset.undo)
+      if (b.dataset.retry) { outbox.retry(b.dataset.retry); outbox.flush({ force: true }); return }
+      if (b.dataset.discard) { if (confirm('Discard this? It was never sent to dispatch.')) outbox.discard(b.dataset.discard); return }
+      if (b.dataset.quick) return sendCompose(b.dataset.quick)
+      if (b.dataset.mode) return setComposeMode(b.dataset.mode)
+      if (b.dataset.undoLoaded) return undoLoaded(b.dataset.undoLoaded)
+      if (b.id === 'btnSend') return sendCompose()
+      if (b.id === 'btnAcceptJob') return acceptDispatch(openJobId, b)
+      if (b.id === 'btnComplete') return markComplete(openJobId, b)
+      if (b.id === 'jobRecenter') return updateJobMap(true)
+    })
+
+    // --- Outbox (dead zones) ---------------------------------------------------------
+    function initOutbox() {
+      outbox = new JobKit.Outbox({
+        storage: window.localStorage,
+        key: 'tt_outbox_v1|' + currentUser.id,
+        send: sendOutboxItem,
+        onChange: scheduleOutboxRender,
+        onDelivered: (it) => {
+          // A message pushes the other side; a note does not (send-message-push
+          // refuses notes too). Fire-and-forget, as before.
+          if (it.type === 'message' && it.payload.kind !== 'note') {
+            sb.functions.invoke('send-message-push', { body: { message_id: it.id } })
+              .catch(err => console.error('Message push failed (non-fatal)', err))
+          }
+          const td = threadData[it.dispatch_id]
+          if (td && it.type === 'message' && !td.messages.some(m => m.id === it.id)) {
+            td.messages.push({ id: it.id, dispatch_id: it.dispatch_id, sender_id: currentUser.id, body: it.payload.body, kind: it.payload.kind, created_at: new Date().toISOString() })
+          }
+          if (it.type === 'load_event') {
+            const ev = { id: it.id, dispatch_id: it.dispatch_id, kind: it.payload.kind, event_at: it.payload.event_at, source: 'driver', driver_id: currentUser.id }
+            if (td && !td.events.some(x => x.id === it.id)) td.events.push(ev)
+            const list = eventsByDispatch[it.dispatch_id] || (eventsByDispatch[it.dispatch_id] = [])
+            if (!list.some(x => x.id === it.id)) list.push(ev)
+          }
+        }
+      })
+      setInterval(() => outbox.flush(), 15000)
+      window.addEventListener('online', () => outbox.flush({ force: true }))
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) { outbox.flush({ force: true }); loadDispatch() } })
+      $('outboxChipHome').addEventListener('click', () => outbox.flush({ force: true }))
+      $('outboxChipJob').addEventListener('click', () => outbox.flush({ force: true }))
+      renderOutboxChips()
+      outbox.flush()
+    }
+
+    async function sendOutboxItem(it) {
+      if (it.type === 'load_event') {
+        return await sb.from('dispatch_load_events').insert({ id: it.id, dispatch_id: it.dispatch_id, kind: it.payload.kind, event_at: it.payload.event_at })
+      }
+      if (it.type === 'message') {
+        return await sb.from('dispatch_messages').insert({ id: it.id, dispatch_id: it.dispatch_id, sender_id: currentUser.id, body: it.payload.body, kind: it.payload.kind })
+      }
+      if (it.type === 'nav') {
+        return await sb.from('nav_handoffs').insert(Object.assign({ id: it.id }, it.payload))
+      }
+      return { error: { code: '22000', message: 'Unknown item' } }
+    }
+
+    let outboxRenderQueued = false
+    function scheduleOutboxRender() {
+      if (outboxRenderQueued) return
+      outboxRenderQueued = true
+      setTimeout(() => {
+        outboxRenderQueued = false
+        renderOutboxChips()
+        if (openJobId) { renderThread(); renderLoadCard() }
+        else renderDispatches()
+      }, 0)
+    }
+
+    function renderOutboxChips() {
+      if (!outbox) return
+      const items = outbox.items().filter(x => x.type !== 'nav')
+      const failed = items.filter(x => x.state === 'failed').length
+      const waiting = items.filter(x => x.state !== 'failed' && !(x.notBefore && Date.now() < x.notBefore) && x.tries > 0).length
+      ;['outboxChipHome', 'outboxChipJob'].forEach(id => {
+        const el = $(id)
+        el.classList.toggle('show', !!(failed || waiting))
+        el.classList.toggle('failed', !!failed)
+        el.innerHTML = failed
+          ? `<span>${failed} not sent to dispatch. Open the job to retry or discard.</span>`
+          : `<span>${waiting} waiting for signal. Sends on its own.</span><span>Retry now</span>`
+      })
+    }
+
+    // --- Open in Maps -------------------------------------------------------------------
+    // No in-app routing at all. The driver picks their own maps app; it gets the
+    // destination only (JobKit.navTargets) and works out the route itself. The
+    // route-responsibility notice shows BEFORE any app opens, and every handoff
+    // is logged (nav_handoffs) with the notice text and the acknowledgement.
+    let navCtx = null
+    const APP_GLYPH = { apple: '<span class="glyph apple">A</span>', google: '<span class="glyph google">G</span>', waze: '<span class="glyph waze">W</span>' }
+
+    function ackOnFile() {
+      try { return localStorage.getItem(JobKit.ackKey(currentUser.id, notice.version, appBuild)) } catch (e) { return null }
+    }
+
+    async function installedTargets(targets) {
+      // A native iPhone build with the launcher: show only apps that are really
+      // installed. Everywhere else, offer the web links (universal links open the
+      // installed app; otherwise they open in the browser).
+      if (isNative && capPlatform === 'ios' && AppLauncher && AppLauncher.canOpenUrl) {
+        const out = []
+        for (const t of targets) {
+          try { const r = await AppLauncher.canOpenUrl({ url: t.scheme + '://' }); if (r && r.value) out.push(Object.assign({ native: true }, t)) } catch (e) {}
+        }
+        return out
+      }
+      const ios = /iPhone|iPad|iPod/.test(navigator.userAgent)
+      return targets.filter(t => t.app !== 'apple' || ios).map(t => Object.assign({ native: false }, t))
+    }
+
+    async function openNavSheet(kind) {
+      const d = jobCache[openJobId]
+      if (!d || !notice) return
+      const stop = DispatchStops.stopOf(d, kind)
+      if (!stop) return
+      const targets = JobKit.navTargets(stop, { startDirections: notice.start_directions })
+      navCtx = { d: d, kind: kind, stop: stop, targets: [] }
+      const n = DispatchStops.hasPickup(d) ? (kind === 'pickup' ? '1' : '2') : '1'
+      const label = kind === 'pickup' ? 'Pickup' : (DispatchStops.hasPickup(d) ? 'Drop-off' : 'Job site')
+      const name = kind === 'pickup' ? (d.pickup_name || d.pickup_address) : d.site_address
+      const addr = kind === 'pickup' && d.pickup_name ? d.pickup_address : ''
+      $('navDest').innerHTML = `<div class="stop ${kind} current" style="padding:0"><span class="stop-dot">${n}</span></div>
+        <div><div class="k">${label}</div><div class="n">${escapeHtml(name)}</div>${addr ? `<div class="a">${escapeHtml(addr)}</div>` : ''}</div>`
+      $('navNoticeText').textContent = notice.text
+      const row = $('navAckRow'), box = $('navAck')
+      const onFile = notice.ack_required ? ackOnFile() : null
+      if (!notice.ack_required) { row.hidden = true }
+      else if (onFile) {
+        row.hidden = false; row.classList.add('on-file'); box.checked = true; box.disabled = true; box.style.display = 'none'
+        $('navAckText').textContent = 'You confirmed on ' + new Date(onFile).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ': "' + notice.ack_text + '"'
+      } else {
+        row.hidden = false; row.classList.remove('on-file'); box.checked = false; box.disabled = false; box.style.display = ''
+        $('navAckText').textContent = notice.ack_text
+      }
+      $('navApps').innerHTML = '<div class="nav-none">Checking your maps apps...</div>'
+      $('navNone').hidden = true
+      $('navSheet').classList.add('open')
+      const avail = await installedTargets(targets)
+      if (!navCtx || navCtx.stop !== stop) return
+      navCtx.targets = avail
+      $('navApps').innerHTML = avail.map(t =>
+        `<button class="btn-app" type="button" data-app="${t.app}">${APP_GLYPH[t.app]}${escapeHtml(t.label)}<span class="go">›</span></button>`).join('')
+      $('navNone').hidden = avail.length > 0
+      syncNavButtons()
+    }
+
+    function syncNavButtons() {
+      const need = notice.ack_required && !ackOnFile()
+      const ok = !need || $('navAck').checked
+      document.querySelectorAll('#navApps .btn-app').forEach(b => { b.disabled = !ok })
+    }
+    $('navAck').addEventListener('change', syncNavButtons)
+
+    function closeNavSheet() { $('navSheet').classList.remove('open'); navCtx = null }
+    $('navCancel').addEventListener('click', closeNavSheet)
+    $('navSheet').addEventListener('click', (e) => { if (e.target.id === 'navSheet') closeNavSheet() })
+
+    $('navApps').addEventListener('click', async (e) => {
+      const b = e.target.closest('button[data-app]')
+      if (!b || b.disabled || !navCtx) return
+      const t = navCtx.targets.find(x => x.app === b.dataset.app)
+      if (!t) return
+      let ackState = 'not_required'
+      if (notice.ack_required) {
+        if (ackOnFile()) ackState = 'on_file'
+        else if ($('navAck').checked) {
+          ackState = 'ticked'
+          try { localStorage.setItem(JobKit.ackKey(currentUser.id, notice.version, appBuild), new Date().toISOString()) } catch (err) {}
+        } else return
+      }
+      const url = t.native ? t.url : t.webUrl
+      const ctx = navCtx
+      // Logged through the outbox: in a dead zone the evidence row waits on the
+      // phone and goes up with the next signal.
+      outbox.enqueue({ type: 'nav', dispatch_id: ctx.d.id, payload: {
+        dispatch_id: ctx.d.id, stop_kind: ctx.kind, nav_app: t.app,
+        dest_text: ctx.stop.address || ctx.stop.label || null,
+        dest_lat: ctx.stop.lat, dest_lng: ctx.stop.lng, launch_url: url,
+        notice_version: notice.version, notice_text: notice.text,
+        ack_text: notice.ack_required ? notice.ack_text : null, ack_state: ackState,
+        app_version: appVersion, web_build: WEB_BUILD, platform: capPlatform, client_at: new Date().toISOString()
+      } })
+      outbox.flush()
+      closeNavSheet()
+      if (t.native && AppLauncher) {
+        try { await AppLauncher.openUrl({ url: url }) } catch (err) { showToast('Could not open ' + t.label + '.', null, null, 3000) }
+      } else {
+        const w = window.open(url, '_blank')
+        if (!w) window.location.href = url
+      }
+    })
+
+    $('navCopy').addEventListener('click', async () => {
+      if (!navCtx) return
+      const text = navCtx.stop.address || navCtx.stop.label || ''
+      let ok = false
+      try { await navigator.clipboard.writeText(text); ok = true } catch (e) {}
+      if (!ok) {
+        const ta = document.createElement('textarea')
+        ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'
+        document.body.appendChild(ta); ta.select()
+        try { ok = document.execCommand('copy') } catch (e) {}
+        ta.remove()
+      }
+      closeNavSheet()
+      showToast(ok ? 'Address copied' : 'Could not copy the address', null, null, 2500)
+    })
+
+    // --- Toast ------------------------------------------------------------------
+    let toastTimer = null, toastAction = null
+    function showToast(text, btnLabel, action, ms) {
+      $('toastText').textContent = text
+      const b = $('toastBtn')
+      toastAction = action || null
+      b.hidden = !btnLabel
+      b.textContent = btnLabel || ''
+      $('toast').classList.add('show')
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => { $('toast').classList.remove('show'); toastAction = null }, ms || 3000)
+    }
+    $('toastBtn').addEventListener('click', () => {
+      const a = toastAction
+      $('toast').classList.remove('show'); toastAction = null; clearTimeout(toastTimer)
+      if (a) a()
+    })
+
+    // --- Maps: where the driver is + the stops. No route line, ever. ---------------
+    let homeMap = null, jobMap = null, homeLayer = null, jobLayer = null
+    // A map is re-fitted when WHAT it must show changes (which pins, whether we
+    // have a fix yet), never just because the truck moved: the driver may have
+    // panned. Keyed by a signature, so a fix that lands before the job list
+    // (common at launch) cannot leave the map zoomed on the truck alone.
+    let homeMe = null, jobMe = null, homeFitSig = null, jobFitSig = null, lastMarkerAt = 0
+    const leafletOk = () => typeof window.L !== 'undefined' && !!window.L.map
+    // Leaflet loads async (a slow CDN must never hold up the job list); the
+    // maps appear when it lands, or say why not.
+    let leafletState = 'loading'
+    window.onLeaflet = function (ok) {
+      leafletState = ok ? 'ok' : 'failed'
+      if (!ok) { $('homeMapFallback').hidden = false; $('jobMapFallback').hidden = false; return }
+      $('homeMapFallback').hidden = true; $('jobMapFallback').hidden = true
+      if (currentUser) { updateHomeMap(); if (openJobId) { ensureJobMap(); updateJobMap(true) } }
+    }
+
+    function makeMap(elId, fallbackId) {
+      if (!leafletOk()) { if (leafletState === 'failed') $(fallbackId).hidden = false; return null }
+      const m = L.map(elId, { zoomControl: false, attributionControl: true })
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(m)
+      m.setView([51.045, -114.06], 10)
+      return m
+    }
+    const pinIcon = (cls, label) => L.divIcon({ className: '', html: `<div class="pin ${cls}"><b></b><span>${label}</span></div>`, iconSize: [30, 40], iconAnchor: [15, 39] })
+    const meIcon = () => L.divIcon({ className: '', html: '<div class="me-marker"></div>', iconSize: [22, 22], iconAnchor: [11, 11] })
+    function stopPins(d, labels) {
+      const out = []
+      const p = DispatchStops.stopOf(d, 'pickup'), q = DispatchStops.stopOf(d, 'dropoff')
+      if (p && p.lat != null) out.push({ ll: [p.lat, p.lng], cls: 'p', label: labels.p, title: 'Pickup: ' + (p.label || '') })
+      if (q && q.lat != null) out.push({ ll: [q.lat, q.lng], cls: 'd', label: labels.d, title: 'Drop-off: ' + (q.address || '') })
+      return out
+    }
+    function fitTo(map, pts) {
+      if (!map || !pts.length) return
+      if (pts.length === 1) map.setView(pts[0], 14)
+      // Clear of the status chip (top left) and the recenter button (top right).
+      else map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [36, 76], paddingBottomRight: [66, 36], maxZoom: 15 })
+    }
+
+    function updateHomeMap() {
+      const visible = !document.body.classList.contains('view-job')
+      if (!homeMap && !visible) return            // created when the home screen shows
+      if (!homeMap) homeMap = makeMap('homeMap', 'homeMapFallback')
+      if (!homeMap) return
+      if (!homeLayer) homeLayer = L.layerGroup().addTo(homeMap)
+      homeLayer.clearLayers()
+      const pts = []
+      const many = activeDispatches.length > 1
+      activeDispatches.forEach((d, i) => {
+        const two = DispatchStops.hasPickup(d)
+        // One job: numbered like its stop list. Several: each pin carries its
+        // job number, and the colour says pickup (amber) or drop-off (blue).
+        stopPins(d, many ? { p: String(i + 1), d: String(i + 1) } : { p: '1', d: two ? '2' : '1' }).forEach(s => {
+          L.marker(s.ll, { icon: pinIcon(s.cls, s.label), title: s.title, keyboard: false }).addTo(homeLayer); pts.push(s.ll)
+        })
+      })
+      const sig = JSON.stringify(pts) + (lastFix ? '|me' : '')
+      if (lastFix) pts.push([lastFix.lat, lastFix.lng])
+      placeMe()
+      if (visible && pts.length && sig !== homeFitSig) { fitTo(homeMap, pts); homeFitSig = sig }
+    }
+
+    function ensureJobMap() {
+      if (!jobMap) jobMap = makeMap('jobMap', 'jobMapFallback')
+      if (jobMap) jobMap.invalidateSize()
+    }
+    function updateJobMap(refit) {
+      if (!jobMap || !openJobId) return
+      const d = jobCache[openJobId]
+      if (!jobLayer) jobLayer = L.layerGroup().addTo(jobMap)
+      jobLayer.clearLayers()
+      const pts = []
+      if (d && !d._missing) {
+        const two = DispatchStops.hasPickup(d)
+        stopPins(d, { p: '1', d: two ? '2' : '1' }).forEach(s => {
+          L.marker(s.ll, { icon: pinIcon(s.cls, s.label), title: s.title, keyboard: false }).addTo(jobLayer); pts.push(s.ll)
+        })
+      }
+      const sig = openJobId + JSON.stringify(pts) + (lastFix ? '|me' : '')
+      if (lastFix) pts.push([lastFix.lat, lastFix.lng])
+      placeMe()
+      if (pts.length && (refit || sig !== jobFitSig)) { fitTo(jobMap, pts); jobFitSig = sig }
+    }
+    $('homeRecenter').addEventListener('click', () => { homeFitSig = null; updateHomeMap() })
+
+    function placeMe() {
+      if (!lastFix) return
+      const ll = [lastFix.lat, lastFix.lng]
+      if (homeMap) { if (!homeMe) homeMe = L.marker(ll, { icon: meIcon(), zIndexOffset: 1000, keyboard: false, title: 'You' }).addTo(homeMap); else homeMe.setLatLng(ll) }
+      if (jobMap) { if (!jobMe) jobMe = L.marker(ll, { icon: meIcon(), zIndexOffset: 1000, keyboard: false, title: 'You' }).addTo(jobMap); else jobMe.setLatLng(ll) }
+    }
+    // Called by the tracking code on every fix (see noteFix).
+    function onMyFix() {
+      const now = Date.now()
+      if (now - lastMarkerAt < 2000) return
+      lastMarkerAt = now
+      const first = !homeMe && !jobMe
+      placeMe()
+      if (first) { updateHomeMap(); if (openJobId) updateJobMap(false) }
+    }
+
+    async function toggleHistory() {
+      const list = document.getElementById('historyList')
+      const open = list.classList.toggle('open')
+      document.getElementById('historyToggle').textContent = open ? 'Hide recent jobs' : 'View recent jobs'
+      if (open && !historyLoaded) await loadHistory()
+    }
+
+    async function loadHistory() {
+      const list = document.getElementById('historyList')
+      list.innerHTML = '<div class="history-item">Loading...</div>'
+      const { data, error } = await sb.from('dispatches')
+        .select('*')
+        .eq('driver_id', currentUser.id)
+        .in('status', ['completed', 'cancelled'])
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      if (error) {
+        list.innerHTML = '<div class="history-item">Could not load recent jobs — tap again when you have signal.</div>'
+        return
+      }
+      historyLoaded = true
+      if (!data || data.length === 0) {
+        list.innerHTML = '<div class="history-item">No past jobs yet</div>'
+        return
+      }
+      historyById = {}
+      data.forEach(d => { historyById[d.id] = d })
+      list.innerHTML = data.map(d => {
+        const timeStr = new Date(d.completed_at || d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        const statusStr = d.status === 'cancelled' ? '<span class="status-cancelled">Cancelled</span>' : 'Completed'
+        const id = escapeHtml(d.id)
+        return `
+          <div class="history-item">
+            <div class="addr">${escapeHtml(DispatchStops.routeText(d))}</div>
+            <div class="meta">${statusStr} · ${timeStr}${d.picked_up_at ? ' · loaded ' + new Date(d.picked_up_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+            ${d.completion_photo_path ? `<img class="history-photo" data-photo="${escapeHtml(d.completion_photo_path)}" alt="Photo attached to this job">` : ''}
+            <button class="history-open" data-open-job="${id}">Messages and details</button><button class="legs-toggle" data-legs="${id}">Show trip breakdown</button>
+            <div class="legs-body" data-legs-body="${id}"></div>
+          </div>
+        `
+      }).join('')
+      hydratePhotos(list)
+    }
+
+    // Signed URLs are minted after the list paints, so a slow storage call
+    // never delays the job history itself.
+    async function hydratePhotos(root) {
+      const imgs = root.querySelectorAll('img[data-photo]')
+      for (const img of imgs) {
+        const url = await signedPhotoUrl(img.dataset.photo)
+        if (url) img.src = url
+        else img.remove()
+      }
+    }
+
+    document.getElementById('historyList').addEventListener('click', (e) => {
+      const oj = e.target.closest('button[data-open-job]')
+      if (oj) { const h = historyById[oj.dataset.openJob]; if (h) jobCache[h.id] = h; openJob(oj.dataset.openJob); return }
+      const btn = e.target.closest('button[data-legs]')
+      if (btn) { toggleLegs(btn.dataset.legs, btn); return }
+      const img = e.target.closest('img[data-photo]')
+      if (img && img.src) openLightbox(img.src)
+    })
+
+    async function toggleLegs(id, btn) {
+      const body = document.querySelector('[data-legs-body="' + CSS.escape(id) + '"]')
+      if (!body) return
+      const open = body.classList.toggle('open')
+      btn.textContent = open ? 'Hide trip breakdown' : 'Show trip breakdown'
+      if (!open || body.dataset.loaded === '1') return
+      const d = historyById[id]
+      if (!d) return
+      body.innerHTML = '<div class="legs-summary">Working out your trips...</div>'
+      try {
+        const from = new Date(d.accepted_at || d.created_at).toISOString()
+        const to = new Date(d.completed_at || Date.now()).toISOString()
+        const { rows } = await TruckLegs.fetchPings(sb, currentUser.id, from, to)
+        // Pickup + drop-off both named, so a Burnco shuttle reads
+        // "Burnco -> Site, Site -> Burnco" instead of lettered stops.
+        const anchors = DispatchStops.anchors(d, 'Site')
+        const seg = TruckLegs.segment(rows, { anchors })
+        const { data: evs } = await sb.from('dispatch_load_events')
+          .select('id, kind, event_at, note, source').eq('dispatch_id', d.id).order('event_at', { ascending: true })
+        const trips = TruckLegs.roundTrips(seg, DispatchStops.tripStops(d, 'Site', evs || []))
+        body.innerHTML = TruckLegs.tripTableHtml(trips, escapeHtml) + renderLegs(seg)
+        body.dataset.loaded = '1'
+      } catch (err) {
+        console.error('Leg breakdown failed', err)
+        body.innerHTML = '<div class="legs-summary">Could not load your trips — tap again when you have signal.</div>'
+      }
+    }
+
+    function renderLegs(r) {
+      const s = r.summary
+      if (!s.legCount && !s.stopCount) {
+        return '<div class="legs-summary">No GPS recorded for this job.</div>'
+      }
+      const head = `<div class="legs-summary">${s.legCount} trip${s.legCount === 1 ? '' : 's'} · `
+        + `${TruckLegs.fmtDuration(s.drivingMs)} driving · ${TruckLegs.fmtDistance(s.distanceM)} · `
+        + `${TruckLegs.fmtSpeed(s.avgKph)} average</div>`
+      return head + r.segments.map(seg => {
+        const when = `${TruckLegs.fmtClock(seg.startAt)}–${TruckLegs.fmtClock(seg.endAt)}`
+        if (seg.type === 'leg') {
+          const route = (seg.fromLabel && seg.toLabel)
+            ? `${escapeHtml(seg.fromLabel)} → ${escapeHtml(seg.toLabel)}` : 'Driving'
+          return `<div class="leg-row drive">
+              <span class="when">${when}</span>
+              <span class="what">${route}<span class="sub">${TruckLegs.fmtDuration(seg.durationMs)} · ${TruckLegs.fmtDistance(seg.distanceM)}</span></span>
+              <span class="speed">${TruckLegs.fmtSpeed(seg.avgKph)}</span>
+            </div>`
+        }
+        if (seg.type === 'stop') {
+          const cls = seg.veryLong ? ' very-long' : (seg.long ? ' long' : '')
+          return `<div class="leg-row stop${cls}">
+              <span class="when">${when}</span>
+              <span class="what">Stopped${seg.stopLabel ? ' at ' + escapeHtml(seg.stopLabel) : ''}</span>
+              <span class="speed">${TruckLegs.fmtDuration(seg.durationMs)}</span>
+            </div>`
+        }
+        return `<div class="leg-row gap">
+            <span class="when">${when}</span>
+            <span class="what">No GPS recorded<span class="sub">Phone out of coverage or app closed</span></span>
+            <span class="speed">${TruckLegs.fmtDuration(seg.durationMs)}</span>
+          </div>`
+      }).join('')
+    }
+
+    // --- Complete a job, optionally with a photo -----------------------------
+    let pendingComplete = null      // { id, btn } while the sheet is open
+    let pendingPhotoDataUrl = null  // the chosen image, not yet uploaded
+
+    function markComplete(id, btn) {
+      if (!activeDispatches.some(x => x.id === id)) return
+      const d = activeDispatches.find(x => x.id === id)
+      pendingComplete = { id: id, btn: btn }
+      pendingPhotoDataUrl = null
+      pendingTicket = null
+      renderTicketSlot()
+      document.getElementById('sheetAddr').textContent = d ? DispatchStops.routeText(d) : ''
+      setPhotoPreview(null)
+      sheetError('')
+      const confirmBtn = document.getElementById('btnConfirmComplete')
+      confirmBtn.disabled = false
+      confirmBtn.textContent = 'Mark Job Complete'
+      document.getElementById('completeSheet').classList.add('open')
+    }
+
+    function closeCompleteSheet() {
+      document.getElementById('completeSheet').classList.remove('open')
+      pendingComplete = null
+      pendingPhotoDataUrl = null
+      pendingTicket = null
+      setPhotoPreview(null)
+    }
+
+    function sheetError(msg) {
+      const el = document.getElementById('sheetError')
+      el.textContent = msg || ''
+      el.classList.toggle('show', !!msg)
+    }
+
+    function setPhotoPreview(dataUrl) {
+      const wrap = document.getElementById('photoPreview')
+      const actions = document.getElementById('photoActions')
+      if (dataUrl) {
+        document.getElementById('photoImg').src = dataUrl
+        wrap.style.display = 'block'
+        actions.style.display = 'none'
+      } else {
+        document.getElementById('photoImg').removeAttribute('src')
+        wrap.style.display = 'none'
+        actions.style.display = 'flex'
+      }
+    }
+
+    document.getElementById('btnCancelComplete').addEventListener('click', closeCompleteSheet)
+    document.getElementById('completeSheet').addEventListener('click', (e) => {
+      if (e.target.id === 'completeSheet') closeCompleteSheet()
+    })
+    document.getElementById('btnRemovePhoto').addEventListener('click', () => {
+      pendingPhotoDataUrl = null
+      setPhotoPreview(null)
+      sheetError('')
+    })
+    document.getElementById('btnTakePhoto').addEventListener('click', () => choosePhoto('camera'))
+    document.getElementById('btnPickPhoto').addEventListener('click', () => choosePhoto('library'))
+    document.getElementById('btnConfirmComplete').addEventListener('click', doComplete)
+
+    async function choosePhoto(mode) {
+      sheetError('')
+      const Camera = isNative && window.Capacitor.Plugins ? window.Capacitor.Plugins.Camera : null
+      if (Camera) {
+        try {
+          // Bounded on the device rather than after upload: drivers are on cell
+          // data, often at the edge of coverage, and a 12 MP original is a
+          // several-megabyte upload that will simply never finish out there.
+          const photo = await Camera.getPhoto({
+            quality: 70,
+            width: 1600,
+            allowEditing: false,
+            correctOrientation: true,
+            resultType: 'dataUrl',
+            source: mode === 'camera' ? 'CAMERA' : 'PHOTOS',
+            saveToGallery: false
+          })
+          if (photo && photo.dataUrl) {
+            pendingPhotoDataUrl = photo.dataUrl
+            setPhotoPreview(photo.dataUrl)
+          }
+        } catch (e) {
+          // The plugin throws on a plain user cancel too, which is not an error
+          // worth showing. Anything else is a permission problem worth naming.
+          const msg = (e && e.message) || ''
+          if (!/cancel/i.test(msg)) {
+            sheetError('Could not open the camera. Check the app has camera and photo permission in Settings.')
+          }
+        }
+        return
+      }
+      // Browser fallback.
+      document.getElementById(mode === 'camera' ? 'fileCamera' : 'filePicker').click()
+    }
+
+    ;['fileCamera', 'filePicker'].forEach(id => {
+      document.getElementById(id).addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0]
+        e.target.value = '' // let the same file be re-picked after a Remove
+        if (!file) return
+        try {
+          const raw = await fileToDataUrl(file)
+          // Only the browser path needs this — @capacitor/camera already caps
+          // the dimension and re-encodes on device.
+          pendingPhotoDataUrl = await downscaleDataUrl(raw, 1600, 0.7)
+          setPhotoPreview(pendingPhotoDataUrl)
+        } catch (err) {
+          console.error('Photo read failed', err)
+          sheetError('Could not read that photo. Try another one.')
+        }
+      })
+    })
+
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader()
+        fr.onload = () => resolve(fr.result)
+        fr.onerror = () => reject(fr.error || new Error('read failed'))
+        fr.readAsDataURL(file)
+      })
+    }
+
+    function downscaleDataUrl(dataUrl, maxDim, quality) {
+      return new Promise((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => {
+          try {
+            const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
+            if (scale === 1 && /^data:image\/jpeg/.test(dataUrl)) return resolve(dataUrl)
+            const c = document.createElement('canvas')
+            c.width = Math.round(img.width * scale)
+            c.height = Math.round(img.height * scale)
+            c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+            resolve(c.toDataURL('image/jpeg', quality))
+          } catch (e) { reject(e) }
+        }
+        img.onerror = () => reject(new Error('decode failed'))
+        img.src = dataUrl
+      })
+    }
+
+    function dataUrlToBlob(dataUrl) {
+      const comma = dataUrl.indexOf(',')
+      const meta = dataUrl.slice(0, comma)
+      const type = (meta.match(/data:([^;]+)/) || [])[1] || 'image/jpeg'
+      const bin = atob(dataUrl.slice(comma + 1))
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      return new Blob([bytes], { type: type })
+    }
+
+    // crypto.randomUUID is iOS 15.4+; this app still supports older phones in
+    // the cab, so do not depend on it for a filename.
+    function photoId() {
+      return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
+    }
+
+    async function doComplete() {
+      if (!pendingComplete) return
+      const { id, btn } = pendingComplete
+      const confirmBtn = document.getElementById('btnConfirmComplete')
+      confirmBtn.disabled = true
+      sheetError('')
+
+      let photoPath = null
+      if (pendingPhotoDataUrl) {
+        confirmBtn.textContent = 'Uploading photo...'
+        try {
+          const blob = dataUrlToBlob(pendingPhotoDataUrl)
+          // Path starts with the driver's own id — that first segment is what
+          // the storage RLS policy checks, so nothing here trusts a client
+          // field to decide who owns the object.
+          const path = `${currentUser.id}/${id}/${photoId()}.jpg`
+          const { error: upErr } = await sb.storage.from('job-photos')
+            .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: false })
+          if (upErr) throw upErr
+          photoPath = path
+        } catch (e) {
+          console.error('Photo upload failed', e)
+          // Never hold a job open because a photo would not upload. The driver
+          // is frequently in a dead zone at exactly this moment, and an
+          // uncompletable job is a far worse failure than a missing photo.
+          confirmBtn.disabled = false
+          confirmBtn.textContent = 'Complete without photo'
+          sheetError('The photo would not upload — probably no signal. Tap again to complete this job without it.')
+          pendingPhotoDataUrl = null
+          setPhotoPreview(null)
+          return
+        }
+      }
+
+      // Ticket goes in BEFORE the job is closed, so a submitted ticket can
+      // never end up attached to a job that failed to complete.
+      if (pendingTicket) {
+        confirmBtn.textContent = 'Submitting ticket...'
+        const { error: tErr } = await sb.from('haul_tickets').insert(
+          Object.assign({}, pendingTicket, { driver_id: currentUser.id, dispatch_id: id })
+        )
+        if (tErr) {
+          console.error('Ticket submit failed', tErr)
+          // Same rule as the photo: never strand a driver on a job they cannot
+          // close because they have no signal. The ticket is kept in memory so
+          // a retry re-sends it; tapping again completes without one.
+          confirmBtn.disabled = false
+          confirmBtn.textContent = 'Complete without ticket'
+          sheetError('The ticket would not submit — probably no signal. Tap again to complete this job without it.')
+          pendingTicket = null
+          renderTicketSlot()
+          return
+        }
+      }
+
+      // Anything this job still has waiting (Loaded/Unloaded taps, notes) goes
+      // first, so it lands before the job closes. Time-boxed: a driver in a dead
+      // zone must still be able to close the job; the server takes a driver's
+      // late taps for 24 h after completion and the outbox keeps retrying.
+      if (outbox && outbox.pendingFor(id).some(x => x.state !== 'failed')) {
+        confirmBtn.textContent = 'Sending your loads...'
+        outbox.list.forEach(x => { if (x.dispatch_id === id) { x.notBefore = 0; x.nextAt = 0 } })
+        await Promise.race([outbox.flush(), new Promise(r => setTimeout(r, 4000))])
+      }
+      confirmBtn.textContent = 'Marking complete...'
+      const patch = { status: 'completed', completed_at: new Date().toISOString() }
+      if (photoPath) patch.completion_photo_path = photoPath
+      const { error } = await sb.from('dispatches').update(patch).eq('id', id)
+
+      if (error) {
+        confirmBtn.disabled = false
+        confirmBtn.textContent = 'Mark Job Complete'
+        sheetError('Could not mark complete — no connection. Try again when you have signal.')
+        setOffline(true, 'Could not mark complete — no connection. Try again when you have signal.')
+        return
+      }
+
+      setOffline(false)
+      closeCompleteSheet()
+      if (btn) { btn.disabled = true; btn.textContent = 'Marking complete...' }
+      if (jobCache[id]) { jobCache[id].status = 'completed'; jobCache[id].completed_at = new Date().toISOString() }
+      if (openJobId === id) closeJob()
+      showToast('Job completed', null, null, 2500)
+      historyLoaded = false
+      activeDispatches = activeDispatches.filter(x => x.id !== id)
+      renderDispatches()
+      loadDispatch()
+    }
+
+    // --- Haul ticket ---------------------------------------------------------
+    // v1 scope: electronic form only. The "photo of the paper ticket" path,
+    // pre-fill from the driver's last ticket, and the per-load
+    // Loaded/Dumped/Cycle/Scale table are all deliberately not here yet — the
+    // 0009 schema already carries columns for them.
+    let pendingTicket = null
+
+    function initTicketForm() {
+      const lh = document.getElementById('ticketLetterhead')
+      const bits = [COMPANY.address, COMPANY.phone, COMPANY.email]
+      if (COMPANY.wcbNumber) bits.push('W.C.B. # ' + COMPANY.wcbNumber)
+      if (COMPANY.gstNumber) bits.push('GST # ' + COMPANY.gstNumber)
+      lh.innerHTML = `<b>${escapeHtml(COMPANY.name)}</b>${bits.map(escapeHtml).join(' · ')}`
+      document.getElementById('tkEquipment').innerHTML =
+        '<option value=""></option>' +
+        EQUIPMENT_TYPES.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')
+    }
+
+    function openTicketForm() {
+      const d = pendingComplete ? activeDispatches.find(x => x.id === pendingComplete.id) : null
+      const t = pendingTicket || {}
+      const now = new Date()
+      const pad = n => String(n).padStart(2, '0')
+
+      document.getElementById('tkDate').value = t.ticket_date || `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+      document.getElementById('tkCustomer').value = t.customer || ''
+      document.getElementById('tkJobNo').value = t.job_number || ''
+      document.getElementById('tkAddress').value = t.site_address || (d ? d.site_address : '')
+      document.getElementById('tkDriver').value = t.driver_name || myProfile.full_name || ''
+      document.getElementById('tkTruck').value = t.truck_number || myProfile.unit_number || ''
+      document.getElementById('tkEquipment').value = t.equipment || ''
+      document.getElementById('tkDescription').value = t.description_of_work || ''
+      document.getElementById('tkAmount').value = t.total != null ? t.total : ''
+      document.getElementById('tkStart').value = t.start_time || ''
+      document.getElementById('tkFinish').value = t.finish_time || ''
+      document.getElementById('tkHours').value = t.total_hours != null ? t.total_hours : ''
+      document.getElementById('tkLoads').value = t.loads_count != null ? t.loads_count : ''
+      document.getElementById('tkMaterial').value = t.material_notes || ''
+      document.getElementById('tkApproval').value = t.customer_approval_name || ''
+      refreshTicketTotal()
+      document.getElementById('ticketForm').classList.add('open')
+    }
+
+    function refreshTicketTotal() {
+      const n = parseFloat(document.getElementById('tkAmount').value)
+      document.getElementById('tkTotalView').textContent =
+        isFinite(n) ? '$' + n.toFixed(2) : '$0.00'
+    }
+
+    // Hours follow from start/finish unless the driver has typed their own —
+    // billed hours and clock hours legitimately differ (minimum charges), so
+    // this only ever fills a blank, it never overwrites.
+    function autoHours() {
+      const s = document.getElementById('tkStart').value
+      const f = document.getElementById('tkFinish').value
+      const box = document.getElementById('tkHours')
+      if (!s || !f || box.dataset.touched === '1') return
+      const [sh, sm] = s.split(':').map(Number)
+      const [fh, fm] = f.split(':').map(Number)
+      let mins = (fh * 60 + fm) - (sh * 60 + sm)
+      if (mins < 0) mins += 24 * 60 // finished after midnight
+      box.value = (mins / 60).toFixed(2)
+    }
+
+    document.getElementById('btnFillTicket').addEventListener('click', openTicketForm)
+    document.getElementById('btnTicketClose').addEventListener('click', () => {
+      document.getElementById('ticketForm').classList.remove('open')
+    })
+    document.getElementById('tkAmount').addEventListener('input', refreshTicketTotal)
+    document.getElementById('tkStart').addEventListener('change', autoHours)
+    document.getElementById('tkFinish').addEventListener('change', autoHours)
+    document.getElementById('tkHours').addEventListener('input', function () { this.dataset.touched = '1' })
+
+    document.getElementById('btnTicketSave').addEventListener('click', () => {
+      const num = (id) => {
+        const v = parseFloat(document.getElementById(id).value)
+        return isFinite(v) ? v : null
+      }
+      const str = (id) => {
+        const v = document.getElementById(id).value.trim()
+        return v === '' ? null : v
+      }
+      const loads = parseInt(document.getElementById('tkLoads').value, 10)
+      pendingTicket = {
+        method: 'electronic',
+        ticket_date: str('tkDate'),
+        customer: str('tkCustomer'),
+        job_number: str('tkJobNo'),
+        site_address: str('tkAddress'),
+        driver_name: str('tkDriver'),
+        truck_number: str('tkTruck'),
+        equipment: str('tkEquipment'),
+        description_of_work: str('tkDescription'),
+        total: num('tkAmount'),
+        start_time: str('tkStart'),
+        finish_time: str('tkFinish'),
+        total_hours: num('tkHours'),
+        loads_count: isFinite(loads) ? loads : null,
+        material_notes: str('tkMaterial'),
+        customer_approval_name: str('tkApproval')
+      }
+      document.getElementById('ticketForm').classList.remove('open')
+      renderTicketSlot()
+    })
+
+    function renderTicketSlot() {
+      const slot = document.getElementById('ticketSlot')
+      if (!pendingTicket) {
+        slot.innerHTML = '<button class="btn-ticket" type="button" id="btnFillTicket">Fill Out Haul Ticket</button>'
+        slot.querySelector('#btnFillTicket').addEventListener('click', openTicketForm)
+        return
+      }
+      const bits = []
+      if (pendingTicket.customer) bits.push(pendingTicket.customer)
+      if (pendingTicket.total != null) bits.push('$' + pendingTicket.total.toFixed(2))
+      if (pendingTicket.total_hours != null) bits.push(pendingTicket.total_hours + ' h')
+      slot.innerHTML = `<div class="ticket-status done">
+          <span>Ticket ready${bits.length ? ' — ' + escapeHtml(bits.join(' · ')) : ''}</span>
+          <button class="btn-ticket-edit" type="button" id="btnEditTicket">Edit</button>
+        </div>`
+      slot.querySelector('#btnEditTicket').addEventListener('click', openTicketForm)
+    }
+
+    // --- Viewing a photo -----------------------------------------------------
+    // Objects are private, so every view needs a short-lived signed URL.
+    const signedUrlCache = {}
+    async function signedPhotoUrl(path) {
+      if (signedUrlCache[path]) return signedUrlCache[path]
+      const { data, error } = await sb.storage.from('job-photos').createSignedUrl(path, 3600)
+      if (error || !data) return null
+      signedUrlCache[path] = data.signedUrl
+      return data.signedUrl
+    }
+
+    function openLightbox(src) {
+      document.getElementById('lightboxImg').src = src
+      document.getElementById('lightbox').classList.add('open')
+    }
+    document.getElementById('lightbox').addEventListener('click', () => {
+      document.getElementById('lightbox').classList.remove('open')
+      document.getElementById('lightboxImg').removeAttribute('src')
+    })
+
+    async function toggleTracking() {
+      tracking ? stopTracking() : startTracking()
+    }
+
+    async function startTracking() {
+      // Native app (installed on the phone): real background tracking via the
+      // OS location service, keeps running with the screen off / app closed.
+      if (isNative && BackgroundGeolocation) {
+        try {
+          bgWatcherId = await BackgroundGeolocation.addWatcher(
+            {
+              backgroundTitle: 'Tracking your truck',
+              backgroundMessage: "Cooney's Truck Tracker is running. Tap to open.",
+              requestPermissions: true,
+              stale: false,
+              // Metres between updates, not a fixed timer — fires roughly every
+              // 3-10s at normal driving speeds and goes silent while parked.
+              // That silence used to mean the app reported NOTHING for a truck
+              // sitting at a pit; startHeartbeat() now fills it in. Keep the
+              // two together: raising this without the heartbeat re-creates the
+              // blind spot, and per-leg times depend on the trail being
+              // continuous. Verify heartbeats are really reaching a device with
+              //   select source, count(*) from location_updates
+              //   where user_id = '...' group by 1;
+              // — the app is fully bundled, so a device on an older build will
+              // show no 'heartbeat' rows at all until it is reinstalled.
+              distanceFilter: 40
+            },
+            (location, error) => {
+              if (error) {
+                if (error.code === 'NOT_AUTHORIZED') {
+                  if (confirm("This app needs location access to track your truck. Open settings now?")) {
+                    BackgroundGeolocation.openSettings()
+                  }
+                }
+                document.getElementById('statusLabel').textContent = 'GPS error'
+                return
+              }
+              if (!tracking) firstActivate()
+              // The watcher only fires once the truck has moved distanceFilter
+              // metres, so every callback here is by definition movement.
+              sendLocation({
+                coords: {
+                  latitude: location.latitude,
+                  longitude: location.longitude,
+                  accuracy: location.accuracy,
+                  speed: location.speed,
+                  heading: location.bearing
+                }
+              }, 'move')
+            }
+          )
+          tracking = true
+          startHeartbeat()
+          document.getElementById('trackToggle').textContent = 'Pause GPS tracking'
+        } catch (e) {
+          alert('Could not start location tracking: ' + e.message)
+        }
+        return
+      }
+
+      // Browser fallback (testing on the web build): foreground-only, screen
+      // must stay on and the tab open — the wake lock keeps the screen alive.
+      if (!navigator.geolocation) {
+        alert('GPS is not available on this device.')
+        return
+      }
+
+      try {
+        if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen')
+      } catch (e) {}
+
+      watchId = navigator.geolocation.watchPosition(
+        pos => {
+          lastPosition = pos
+          if (!tracking) firstActivate()
+          // watchPosition fires roughly once a second, so writing every
+          // callback floods the table. Throttle to the same 40m the native
+          // watcher uses and let the heartbeat cover standing still — the two
+          // platforms then produce comparable trails to segment.
+          const moved = !lastSentFix || distanceM(
+            lastSentFix.lat, lastSentFix.lng, pos.coords.latitude, pos.coords.longitude
+          ) >= BROWSER_MIN_MOVE_M
+          if (moved) sendLocation(pos, 'move')
+          else noteFix(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, pos.coords.speed, pos.coords.heading)
+        },
+        err => {
+          document.getElementById('statusLabel').textContent = 'GPS error'
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      )
+
+      tracking = true
+      startHeartbeat()
+      document.getElementById('trackToggle').textContent = 'Pause GPS tracking'
+    }
+
+    function distanceM(aLat, aLng, bLat, bLng) {
+      // Fail OPEN if legs.js somehow did not load: Infinity means "treat every
+      // fix as movement", which degrades to the old send-everything behaviour
+      // and to no parked indicator. Returning 0 would have silently stopped
+      // the driver reporting at all, which is far worse.
+      return (window.TruckLegs && TruckLegs.haversine)
+        ? TruckLegs.haversine(aLat, aLng, bLat, bLng)
+        : Number.POSITIVE_INFINITY
+    }
+
+    // Remember where we are without necessarily writing a row.
+    function noteFix(lat, lng, accuracy, speed, heading) {
+      lastFix = { lat: lat, lng: lng, accuracy: accuracy, speed: speed, heading: heading }
+      onMyFix()   // moves the 'you' dot on the driver's maps (0013)
+      if (!parkedAnchor || distanceM(parkedAnchor.lat, parkedAnchor.lng, lat, lng) > PARKED_RADIUS_M) {
+        parkedAnchor = { lat: lat, lng: lng }
+        parkedSince = Date.now()
+      }
+    }
+
+    function startHeartbeat() {
+      if (heartbeatTimer) return
+      heartbeatTimer = setInterval(() => {
+        if (!tracking) return
+        // Re-log the last known position rather than forcing a fresh GPS lock.
+        // The truck is not moving; the point is to prove the app is alive and
+        // the truck is still here, which costs a row, not a radio.
+        if (lastFix && Date.now() - lastSentAt >= HEARTBEAT_MS) {
+          sendLocation({ coords: {
+            latitude: lastFix.lat, longitude: lastFix.lng,
+            accuracy: lastFix.accuracy, speed: 0, heading: lastFix.heading
+          } }, 'heartbeat')
+        }
+        renderTrackingStatus()
+      }, HEARTBEAT_TICK_MS)
+    }
+
+    // Tell the driver what the office is seeing. A truck that has been sitting
+    // for 10 minutes is about to generate an alert; showing that on their own
+    // screen first makes the alert land as a nudge rather than an ambush.
+    function renderTrackingStatus() {
+      if (!tracking) return
+      const ring = document.getElementById('statusRing')
+      const label = document.getElementById('statusLabel')
+      const parkedMs = parkedSince ? Date.now() - parkedSince : 0
+      if (parkedSince && parkedMs >= PARKED_NOTICE_MS) {
+        ring.classList.remove('active')
+        ring.classList.add('parked')
+        label.textContent = 'Parked ' + Math.round(parkedMs / 60000) + ' min'
+      } else {
+        ring.classList.remove('parked')
+        ring.classList.add('active')
+        label.textContent = 'Live'
+      }
+    }
+
+    function firstActivate() {
+      document.getElementById('statusRing').classList.add('active')
+      document.getElementById('statusLabel').textContent = 'Live'
+    }
+
+    async function stopTracking() {
+      if (isNative && BackgroundGeolocation && bgWatcherId) {
+        try { await BackgroundGeolocation.removeWatcher({ id: bgWatcherId }) } catch (e) {}
+        bgWatcherId = null
+      }
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId)
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+      if (wakeLock) { try { wakeLock.release() } catch(e) {} wakeLock = null }
+      tracking = false
+      watchId = null
+      heartbeatTimer = null
+      lastPosition = null
+      lastFix = null
+      parkedAnchor = null
+      parkedSince = 0
+      document.getElementById('statusRing').classList.remove('parked')
+      document.getElementById('statusRing').classList.remove('active')
+      document.getElementById('statusLabel').textContent = 'Paused'
+      document.getElementById('trackToggle').textContent = 'Resume GPS tracking'
+    }
+
+    async function sendLocation(pos, source) {
+      const lat = pos.coords.latitude
+      const lng = pos.coords.longitude
+      noteFix(lat, lng, pos.coords.accuracy, pos.coords.speed, pos.coords.heading)
+      const { error } = await sb.from('location_updates').insert({
+        user_id: currentUser.id,
+        lat: lat,
+        lng: lng,
+        accuracy: pos.coords.accuracy,
+        speed: pos.coords.speed,
+        heading: pos.coords.heading,
+        source: source || 'move'
+      })
+      if (!error) {
+        // Only advance the heartbeat clock on a row that actually landed. If
+        // the driver is in a dead zone every insert fails, and pretending
+        // otherwise would suppress the retry the next tick would have made.
+        lastSentAt = Date.now()
+        lastSentFix = { lat: lat, lng: lng }
+        document.getElementById('infoLastSent').textContent = 'Last ping ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+      renderTrackingStatus()
+    }
+
+    async function signOut() {
+      // Taps, notes or messages still waiting for signal live on this phone
+      // under this login; signing out drops them. Say so before it happens.
+      const waiting = outbox ? outbox.count() : 0
+      if (waiting && !confirm(waiting + (waiting === 1 ? ' item has' : ' items have') + ' not reached dispatch yet (no signal). Signing out now deletes ' + (waiting === 1 ? 'it' : 'them') + '. Sign out anyway?')) return
+      await stopTracking()
+      // Release this device's push token. An APNs token identifies the app
+      // INSTALL, not the user — on a shared cab phone the next driver to sign in
+      // would otherwise inherit our notifications, and we'd stop getting ours.
+      // Time-boxed: a driver on a dead connection must still be able to sign out.
+      // If the clear does not land, the token is overwritten on the next sign-in
+      // anyway — this is a best-effort tidy-up, not a blocking step.
+      const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(r, ms))])
+      try {
+        // Scoped to the token this install registered. An unconditional clear
+        // would let a browser or Android sign-out wipe the token an iPhone
+        // registered, and the iPhone only rewrites it on next app launch —
+        // silently killing push for that driver in the meantime.
+        if (currentUser && myPushToken) {
+          await withTimeout(
+            sb.from('profiles').update({ push_token: null })
+              .eq('id', currentUser.id).eq('push_token', myPushToken),
+            3000,
+          )
+        }
+        if (PushNotifications) await withTimeout(PushNotifications.removeAllListeners(), 1000)
+      } catch (e) { console.error('Sign-out cleanup failed', e) }
+      if (dispatchChannel) { sb.removeChannel(dispatchChannel); dispatchChannel = null }
+      try { if (outbox) localStorage.removeItem(outbox.key) } catch (e) {}
+      await sb.auth.signOut()
+      window.location.href = 'index.html'
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        if (regs.length > 0) {
+          Promise.all(regs.map(r => r.unregister())).then(() => window.location.reload())
+        }
+      })
+    }
+  </script>
+</body>
+</html>

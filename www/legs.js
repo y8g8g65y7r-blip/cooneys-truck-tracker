@@ -696,6 +696,7 @@
       // whether GPS saw it or it was called in.
       loads: trips.filter(function (t) { return t.darr || t.dleave; }).length,
       calledIn: (stopsIn.events || []).length,
+      driverTaps: (stopsIn.events || []).some(function (e) { return e.source === 'driver'; }),
       trips: out.length,
       completeTrips: cycles.length,
       avgLoadMs: avg(loadMs), avgLoadedMs: avg(loadedMs), avgDumpMs: avg(dumpMs), avgEmptyMs: avg(emptyMs),
@@ -791,7 +792,7 @@
     var fl = rt.firstLoad;
     var head = '<div class="trips-head"><span class="t">Round trips</span><span class="route">' + esc(rt.pickup.label) + ' → ' + esc(rt.dropoff.label) + '</span></div>' +
       '<div class="trips-stats"><span><b>' + s.loads + '</b> load' + (s.loads === 1 ? '' : 's') + ' delivered</span>' +
-      (s.calledIn ? '<span><b>' + s.calledIn + '</b> logged</span>' : '') +   // driver taps + phone-ins, not only calls (0013)
+      (s.calledIn ? '<span><b>' + s.calledIn + '</b> ' + (s.driverTaps ? 'logged' : 'called in') + '</span>' : '') +   // "logged" once driver taps are in it (0013)
       '<span>Avg cycle <b>' + fmtShort(s.avgCycleMs) + '</b></span>' +
       (fl ? '<span>First load <b>' + (val(fl, false) || '—') + '</b></span>' : '') +
       (s.otherStopMs ? '<span>Other stops <b>' + fmtShort(s.otherStopMs) + '</b></span>' : '') + '</div>';
