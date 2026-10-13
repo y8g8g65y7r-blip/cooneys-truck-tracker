@@ -168,6 +168,21 @@
     .job-card.accepted { box-shadow: 0 0 0 2px #22c55e; }
     .jc-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
     .jc-when { font-size: 12px; color: #6c757d; font-weight: 600; }
+    /* --- Equipment (0017): what to take, first thing on the job --------------- */
+    .equip { border-radius: 16px; padding: 14px 16px; background: #fff; box-shadow: inset 6px 0 0 #004AAD; }
+    .equip.trailer { box-shadow: inset 6px 0 0 #b45309; }
+    .equip.unset { background: #fff7ed; box-shadow: inset 6px 0 0 #b45309; }
+    .equip .eh { font-size: 22px; font-weight: 900; letter-spacing: 0.4px; color: #15161a; line-height: 1.15; }
+    .equip.unset .eh { font-size: 17px; color: #9a3412; }
+    .equip .ed { font-size: 14px; font-weight: 700; color: #374151; margin-top: 4px; overflow-wrap: anywhere; }
+    .equip .ea { display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 900; letter-spacing: 0.6px; padding: 7px 11px; border-radius: 8px; background: #eaf1ff; color: #004AAD; }
+    .equip.trailer .ea { background: #b45309; color: #fff; }
+    .equip .echg { display: inline-block; font-size: 10.5px; font-weight: 900; letter-spacing: 0.8px; padding: 3px 8px; border-radius: 6px; background: #b91c1c; color: #fff; margin-bottom: 6px; }
+    .jc-equip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .jc-equip .h { font-size: 15px; font-weight: 900; color: #15161a; letter-spacing: 0.3px; }
+    .jc-equip .a { font-size: 10.5px; font-weight: 900; letter-spacing: 0.6px; padding: 3px 7px; border-radius: 6px; background: #b45309; color: #fff; }
+    .jc-equip .chg { font-size: 10.5px; font-weight: 900; padding: 3px 7px; border-radius: 6px; background: #b91c1c; color: #fff; }
+    .jc-equip.unset .h { color: #9a3412; font-size: 13px; }
     .jc-unit { font-size: 11.5px; font-weight: 800; color: #004AAD; background: #eaf1ff; padding: 4px 8px; border-radius: 6px; letter-spacing: 0.3px; }
     .jc-unit.none { color: #6c757d; background: #f1f3f5; }
     .pill {
@@ -883,6 +898,9 @@
       <div class="offline-note" id="offlineNoteJob"></div>
       <button class="outbox-chip" id="outboxChipJob" type="button"></button>
 
+      <!-- 0017: what he is driving, first thing on the screen. -->
+      <section id="equipCard" aria-live="polite"></section>
+
       <section class="map-card" aria-label="Map of this job">
         <div id="jobMap" class="map map-job" role="img" aria-label="Map of your truck and this job's stops"></div>
         <div class="map-fallback" id="jobMapFallback" hidden>Map needs a connection. Stops and Open in Maps still work.</div>
@@ -1177,6 +1195,11 @@
     let outbox = null
     let lastLoadTap = null
     let jobPushed = false     // true only when WE pushed the #job entry (so Back can pop it)
+    // (0017) Equipment: last-seen signature per job, and jobs whose equipment
+    // dispatch changed since the driver last looked.
+    let equipSigById = {}
+    let changedEquip = new Set()
+    let ticketEquipTypes = []
     const QUICK_REPLIES = ['On my way', 'Delayed 15 min', 'Arrived on site', 'Need more info']
     const LOAD_UNDO_MS = 5000
 
@@ -1227,6 +1250,7 @@
       $('infoName').textContent = profile?.full_name || 'Unknown'
       $('unitBadge').textContent = 'UNIT …'   // set from the open job(s) once they load (0015)
       setComposeMode('message')
+      loadTicketEquipment()
       const m = /^#job=([0-9a-f-]{36})$/i.exec(location.hash)
       if (m) openJob(m[1], { replace: true })
       loadDispatch()
@@ -1394,6 +1418,15 @@
       setOffline(false)
       activeDispatches = data || []
       activeDispatches.forEach(d => { jobCache[d.id] = d })
+      // (0017) Dispatch changed what he is taking on an open job: say so.
+      activeDispatches.forEach(d => {
+        const sig = JobKit.equipmentSig(d)
+        if (equipSigById[d.id] !== undefined && equipSigById[d.id] !== sig && d.equipment_name) {
+          changedEquip.add(d.id)
+          showToast('Equipment changed: now ' + JobKit.equipmentInfo(d).headline, 'Open', () => openJob(d.id), 10000)
+        }
+        equipSigById[d.id] = sig
+      })
       await loadSummaries(seq)
       if (seq !== loadSeq) return
       renderDispatches()
@@ -1482,7 +1515,8 @@
       renderUnitBadge()
       const list = $('dispatchList')
       const countEl = $('jobCount')
-      const sig = JSON.stringify([activeDispatches.map(d => [d.id, d.accepted_at, d.site_address, d.notes, d.lat, d.lng, d.unit_number,
+      const sig = JSON.stringify([[...changedEquip], activeDispatches.map(d => [d.id, d.accepted_at, d.site_address, d.notes, d.lat, d.lng, d.unit_number,
+        d.equipment_type_id, d.equipment_name, d.trailer_number,
         d.pickup_name, d.pickup_address, d.pickup_lat, d.pickup_lng, d.picked_up_at, d.pickup_source,
         (eventsByDispatch[d.id] || []).map(e => [e.id, e.kind, e.event_at]), isUnread(d.id)]),
         outbox ? outbox.items().map(x => [x.id, x.state]) : []])
@@ -1519,8 +1553,13 @@
       const actions = accepted
         ? `<button class="btn-open" data-open="${id}">Open Job <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>`
         : `<button class="btn-accept" data-accept="${id}">Accept Job</button><button class="btn-details" data-open="${id}">Details</button>`
+      const e = JobKit.equipmentInfo(d)
+      const equip = e.set
+        ? `<div class="jc-equip"><span class="h">${escapeHtml(e.headline)}</span>${e.trailer ? `<span class="a">${escapeHtml(e.action)}</span>` : ''}${changedEquip.has(d.id) ? '<span class="chg">CHANGED</span>' : ''}</div>`
+        : '<div class="jc-equip unset"><span class="h">Equipment not set — ask dispatch</span></div>'
       return `
         <article class="card job-card ${accepted ? 'accepted' : 'pending'}" data-dispatch="${id}">
+          ${equip}
           <div class="jc-top">${pill}<span class="jc-unit${d.unit_number ? '' : ' none'}">${d.unit_number ? 'Unit ' + escapeHtml(d.unit_number) : 'No unit'}</span><span class="jc-when">${activeDispatches.length > 1 ? 'Job ' + (i + 1) + ' · ' : ''}Sent ${escapeHtml(clock(new Date(d.created_at).getTime()))}</span>${unread}</div>
           ${route}
           ${d.notes ? `<div class="jc-notes">${escapeHtml(d.notes)}</div>` : ''}
@@ -1587,6 +1626,7 @@
     }
 
     function showHome() {
+      if (openJobId) changedEquip.delete(openJobId)   // he has seen the change
       openJobId = null
       document.body.classList.remove('view-job')
       try { if (location.hash) history.replaceState(null, '', location.pathname + location.search) } catch (e) {}
@@ -1634,6 +1674,7 @@
       if (!active) { pill.className = 'pill ' + (d.status === 'cancelled' ? 'cancelled' : 'done'); pill.textContent = d.status === 'cancelled' ? 'Cancelled' : 'Completed' }
       else if (!accepted) { pill.className = 'pill pending'; pill.textContent = 'New' }
       else { pill.className = 'pill accepted'; pill.textContent = 'Accepted' }
+      $('equipCard').innerHTML = equipBannerHtml(d, changedEquip.has(id))
       show('acceptCard', active && !accepted)
       show('loadCard', active && accepted)
       show('finishCard', active && accepted)
@@ -1643,6 +1684,36 @@
       renderThread()
       updateJobMap(false)
     }
+
+    // (0017) The equipment banner: what to take, before anything else.
+    function equipBannerHtml(d, changed) {
+      const e = JobKit.equipmentInfo(d)
+      if (!e.set) {
+        return `<div class="equip unset"><div class="eh">EQUIPMENT NOT SET</div><div class="ed">${escapeHtml(e.unit)} · Ask dispatch what you are taking.</div></div>`
+      }
+      return `<div class="equip${e.trailer ? ' trailer' : ''}">${changed ? '<div class="echg">CHANGED BY DISPATCH</div>' : ''}
+        <div class="eh">${escapeHtml(e.headline)}</div>
+        <div class="ed">${escapeHtml(e.unit)}${e.trailer ? ' + ' + escapeHtml(e.trailer) : ''} · ${escapeHtml(e.type)}</div>
+        <div class="ea">${escapeHtml(e.action)}</div></div>`
+    }
+
+    // Haul ticket equipment: the rate-sheet types first, the old paper-ticket
+    // names still valid (EQUIPMENT_TYPES in config.js), and the job's own type.
+    async function loadTicketEquipment() {
+      const { data, error } = await sb.from('equipment_types').select('name, sort_order').eq('active', true).order('sort_order')
+      if (!error && data) ticketEquipTypes = data
+      renderTicketEquipment()
+    }
+    function renderTicketEquipment(extra) {
+      const names = ticketEquipTypes.map(t => t.name)
+      const legacy = EQUIPMENT_TYPES.filter(x => !names.includes(x))
+      const opt = v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`
+      $('tkEquipment').innerHTML = '<option value=""></option>' +
+        (names.length ? '<optgroup label="Equipment (rate sheet)">' + names.map(opt).join('') + '</optgroup>' : '') +
+        '<optgroup label="Paper ticket names">' + legacy.map(opt).join('') + '</optgroup>' +
+        (extra && !names.includes(extra) && !legacy.includes(extra) ? '<optgroup label="This job">' + opt(extra) + '</optgroup>' : '')
+    }
+    function setTicketEquipment(v) { renderTicketEquipment(v); $('tkEquipment').value = v || '' }
 
     function currentItems() {
       const id = openJobId, d = jobCache[id] || {}
@@ -2592,9 +2663,7 @@
       if (COMPANY.wcbNumber) bits.push('W.C.B. # ' + COMPANY.wcbNumber)
       if (COMPANY.gstNumber) bits.push('GST # ' + COMPANY.gstNumber)
       lh.innerHTML = `<b>${escapeHtml(COMPANY.name)}</b>${bits.map(escapeHtml).join(' · ')}`
-      document.getElementById('tkEquipment').innerHTML =
-        '<option value=""></option>' +
-        EQUIPMENT_TYPES.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')
+      renderTicketEquipment()
     }
 
     function openTicketForm() {
@@ -2609,7 +2678,7 @@
       document.getElementById('tkAddress').value = t.site_address || (d ? d.site_address : '')
       document.getElementById('tkDriver').value = t.driver_name || myProfile.full_name || ''
       document.getElementById('tkTruck').value = t.truck_number || (d && d.unit_number) || ''
-      document.getElementById('tkEquipment').value = t.equipment || ''
+      setTicketEquipment(t.equipment || (d && d.equipment_name) || '')
       document.getElementById('tkDescription').value = t.description_of_work || ''
       document.getElementById('tkAmount').value = t.total != null ? t.total : ''
       document.getElementById('tkStart').value = t.start_time || ''

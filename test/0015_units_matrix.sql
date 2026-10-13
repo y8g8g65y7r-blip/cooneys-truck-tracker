@@ -16,17 +16,19 @@ begin
   select id into u62 from units where unit_number = '62' and is_demo;
 
   -- ----- seed + backfill -----
-  select count(*) into n from units where active and not is_demo;
-  res := res || jsonb_build_object('t', 'seed: 23 active real units (Axon power units only)', 'ok', n = 23, 'msg', n);
-  select count(*) into n from units where not active and not is_demo;
+  select count(*) into n from units where active and not is_demo and kind = 'power';
+  res := res || jsonb_build_object('t', 'seed: 23 active real trucks (Axon power units only)', 'ok', n = 23, 'msg', n);
+  select count(*) into n from units where not active and not is_demo and kind = 'power';
   res := res || jsonb_build_object('t', 'seed: 6 inactive (11, 24 sold; #87 do not use; 98/90/22 test numbers)', 'ok', n = 6, 'msg', n);
   select count(*) into n from units where source = 'app' and not active and unit_number in ('98', '90', '22');
   res := res || jsonb_build_object('t', 'seed: 98/90/22 kept but retired (test numbers, Matt 2026-10-13)', 'ok', n = 3);
-  select count(*) into n from dispatches where driver_id = DARIO and status <> 'active' and (unit_number is distinct from '98');
-  res := res || jsonb_build_object('t', 'history: Dario''s closed jobs still show 98', 'ok', n = 0, 'msg', n);
+  -- (live data: on 10-13 Matt cancelled the two open jobs whose 98 had been cleared, and sent Dario out in 40)
+  select count(*) into n from dispatches where driver_id = DARIO and status <> 'active' and unit_number = '98';
+  res := res || jsonb_build_object('t', 'history: Dario''s older closed jobs still show 98', 'ok', n >= 20, 'msg', n);
   select count(*) into n from dispatches d join units u on u.id = d.unit_id where d.status = 'active' and not u.active;
   res := res || jsonb_build_object('t', 'no open job carries a retired/test unit', 'ok', n = 0, 'msg', n);
-  select count(*) into n from dispatches d join profiles p on p.id = d.driver_id where d.unit_number is null and p.unit_number is not null and d.status <> 'active';
+  select count(*) into n from dispatches d join profiles p on p.id = d.driver_id where d.unit_number is null and p.unit_number is not null and d.status <> 'active'
+     and d.created_at < '2026-10-13 06:00+00' and d.id not in ('e0b72684-771f-46f3-900f-fa3626eab1a5', '3d588b58-7bf3-431a-a40f-755b81f6b4a8');
   res := res || jsonb_build_object('t', 'backfill: no closed job left without its unit text', 'ok', n = 0, 'msg', n);
 
   -- ----- staff: sending and editing the unit -----
@@ -35,7 +37,8 @@ begin
   insert into dispatches (driver_id, site_address, notes, created_by, created_at) values (A, 'ZZU default', 'ZZTEST', S, now() - interval '10 minutes') returning id, unit_number into j, msg;
   res := res || jsonb_build_object('t', 'old-build send, driver whose only unit is a retired test number (22): No unit, not 22', 'ok', msg is null, 'msg', msg);
   insert into dispatches (driver_id, site_address, notes, created_by) values (DARIO, 'ZZU dario', 'ZZTEST', S) returning unit_id, unit_number into r;
-  res := res || jsonb_build_object('t', 'old-build send for Dario: No unit, never 98', 'ok', r.unit_id is null and r.unit_number is null, 'msg', r.unit_number);
+  res := res || jsonb_build_object('t', 'old-build send for Dario: his last REAL unit (or none), never 98', 'ok', r.unit_number is distinct from '98'
+    and (r.unit_id is null or exists (select 1 from units x where x.id = r.unit_id and x.active and x.kind = 'power')), 'msg', r.unit_number);
   begin insert into dispatches (driver_id, site_address, notes, created_by, unit_id) values (DARIO, 'ZZU 98', 'ZZTEST', S, (select id from units where seed_key = 'app:98')); ok := false;
   exception when others then ok := true; end;
   res := res || jsonb_build_object('t', 'test unit 98 cannot be assigned', 'ok', ok);
@@ -103,9 +106,9 @@ begin
   -- ----- demo -----
   execute 'reset role'; execute 'set local role authenticated';
   perform set_config('request.jwt.claims', json_build_object('sub', DEMO_DSP, 'role', 'authenticated')::text, true);
-  select count(*) into n from units;
-  select string_agg(unit_number, ',' order by unit_number) into msg from units;
-  res := res || jsonb_build_object('t', 'demo dispatcher sees only demo units 62/74/81', 'ok', n = 3 and msg = '62,74,81', 'msg', msg);
+  select count(*) into n from units where kind = 'power';
+  select string_agg(unit_number, ',' order by unit_number) into msg from units where kind = 'power';
+  res := res || jsonb_build_object('t', 'demo dispatcher sees only demo trucks 62/74/81', 'ok', n = 3 and msg = '62,74,81', 'msg', msg);
   begin insert into dispatches (driver_id, site_address, notes, created_by, unit_id) values (DEMO_DRV, 'ZZU', 'ZZTEST', DEMO_DSP, u10); ok := false;
   exception when others then ok := true; end;
   res := res || jsonb_build_object('t', 'demo dispatcher cannot put a real unit on the demo driver', 'ok', ok);

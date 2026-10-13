@@ -209,6 +209,10 @@
     }
     .dispatch-info { flex: 1; min-width: 0; }
     .field-hint { font-size: 11.5px; color: #6c757d; margin-top: 5px; min-height: 14px; }
+    .req { font-size: 9.5px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: #b45309; margin-left: 6px; }
+    .equip-line { font-size: 11.5px; font-weight: 800; color: #15161a; margin-top: 2px; letter-spacing: 0.2px; }
+    .equip-line.unset { color: #b45309; }
+    .equip-line .hook { color: #b45309; }
     .modal-unit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 2px; font-size: 13px; }
     .modal-unit select { border: 1.5px solid #e2e8f0; border-radius: 8px; padding: 7px 8px; font-size: 14px; font-family: inherit; }
     .modal-unit button { border: none; border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700; background: var(--brand-blue); color: #fff; cursor: pointer; font-family: inherit; }
@@ -785,7 +789,7 @@
     </div>
     <div class="header-right">
       <a href="employees.html" class="btn-nav">Employees</a>
-      <a href="units.html" class="btn-nav">Units</a>
+      <a href="units.html" class="btn-nav">Units &amp; Equipment</a>
       <a href="map.html" class="btn-nav">📍 Live Map</a>
       <button class="btn-nav" onclick="signOut()">Sign Out</button>
     </div>
@@ -795,6 +799,16 @@
 
     <div class="card">
       <div class="card-title">Send Dispatch</div>
+
+      <!-- 0017: what the driver is taking. FIRST and required: it decides whether a
+           trailer goes on, and each type is priced differently (rate sheet). -->
+      <div class="field">
+        <label for="equipSelect">Equipment <span class="req">Required</span></label>
+        <select id="equipSelect">
+          <option value="">Loading equipment...</option>
+        </select>
+        <div class="field-hint" id="equipHint"></div>
+      </div>
 
       <div class="field">
         <label for="driverSelect">Driver</label>
@@ -806,11 +820,19 @@
       <!-- 0015: the unit belongs to the JOB, not the driver. Defaults to the
            unit this driver was last dispatched in; change it per job. -->
       <div class="field">
-        <label for="unitSelect">Unit</label>
+        <label for="unitSelect">Truck (unit)</label>
         <select id="unitSelect">
           <option value="">Loading units...</option>
         </select>
         <div class="field-hint" id="unitHint"></div>
+      </div>
+
+      <!-- 0017: only when the equipment hooks up a trailer. Optional for now:
+           trailer numbers are not always known when the job goes out. -->
+      <div class="field" id="trailerField" hidden>
+        <label for="trailerSelect" id="trailerLabel">Trailer</label>
+        <select id="trailerSelect"></select>
+        <div class="field-hint">Optional. Leave "not known yet" if you don't have the number.</div>
       </div>
 
       <!-- Optional first stop. Closed = a single-stop dispatch, exactly as before. -->
@@ -881,6 +903,7 @@
       <div class="modal-title" id="modalTitle"></div>
       <div class="modal-driver" id="modalDriver"></div>
       <div class="modal-unit" id="modalUnit"></div>
+      <div class="modal-unit" id="modalEquip"></div>
       <div class="modal-notes" id="modalNotes" style="display:none;"></div>
       <img class="modal-photo" id="modalPhoto" alt="Photo the driver attached when completing this job">
       <div id="modalTicket"></div>
@@ -998,6 +1021,11 @@
     // (0015) Active units for the pickers, and a per-driver "last unit" cache.
     let unitsList = []
     let unitsLoaded = false
+    // (0017) Equipment types (rate-sheet classes) and trailers for the pickers.
+    let equipTypes = []
+    let equipLoaded = false
+    let trailersList = []
+    const KIND_WORD = { pup: 'pup', quad: 'quad', end_dump: 'end-dump trailer', demo_rock_box: 'demo/rock box', low_bed: 'low bed', other: 'trailer' }
     let boardSeen = null
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1012,7 +1040,8 @@
       // Never let a slow or failed roster query gate the dispatch list, the poll
       // or the realtime subscription — the list degrades to "Unknown driver",
       // which is far better than showing nothing at all.
-      try { await Promise.all([loadDrivers(), loadUnits()]) } catch (e) { console.error('Driver roster / units failed to load', e) }
+      try { await Promise.all([loadDrivers(), loadUnits(), loadEquipment()]) } catch (e) { console.error('Driver roster / units / equipment failed to load', e) }
+      document.getElementById('equipSelect').addEventListener('change', onEquipChange)
       defaultUnitForDriver(document.getElementById('driverSelect').value)
       document.getElementById('driverSelect').addEventListener('change', e => defaultUnitForDriver(e.target.value))
       loadActiveDispatches()
@@ -1267,6 +1296,7 @@
               <div class="dispatch-info">
                 <div class="addr">${routeHtml(d)}</div>
                 <div class="meta">${escapeHtml(name)} · ${timeStr}${d.picked_up_at ? ' · loaded ' + escapeHtml(clock(d.picked_up_at)) : ''}${d.completion_photo_path ? '<span class="photo-badge">Photo</span>' : ''}<span data-ticket-for="${id}"></span></div>
+                ${equipLineHtml(d)}
               </div>
               <span class="history-status ${escapeHtml(d.status)}">${d.status === 'cancelled' ? 'Cancelled' : 'Completed'}</span>
               <span class="dispatch-chevron">›</span>
@@ -1347,7 +1377,9 @@
 
       document.getElementById('modalTitle').textContent = DispatchStops.routeText(d)
       document.getElementById('modalDriver').textContent = (d.unit_number ? 'Unit ' + d.unit_number : 'No unit') + ' — ' + name
-      renderModalUnit(d)
+      document.getElementById('modalUnit').innerHTML = ''
+      document.getElementById('modalDriver').innerHTML = modalDriverHtml(d)
+      renderModalEquip(d)
 
       const notesEl = document.getElementById('modalNotes')
       if (d.notes) { notesEl.textContent = d.notes; notesEl.style.display = 'block' }
@@ -1885,7 +1917,7 @@
 
     async function loadUnits() {
       const sel = document.getElementById('unitSelect')
-      const { data, error } = await sb.from('units').select('id, unit_number, make, year, confirmed').eq('active', true)
+      const { data, error } = await sb.from('units').select('id, unit_number, make, year, confirmed, kind, trailer_kind').eq('active', true)
       if (error) {
         // Old database / no access: send without a unit and let the server
         // default it, exactly as older builds do.
@@ -1893,7 +1925,9 @@
         sel.innerHTML = '<option value="">Units unavailable — the job keeps the driver\'s last unit</option>'
         return
       }
-      unitsList = (data || []).slice().sort(unitSort)
+      // (0017) trucks and trailers share the table; each picker gets its own kind.
+      unitsList = (data || []).filter(u => (u.kind || 'power') === 'power').sort(unitSort)
+      trailersList = (data || []).filter(u => u.kind === 'trailer').sort(unitSort)
       unitsLoaded = true
       sel.innerHTML = '<option value="none">No unit</option>' +
         unitsList.map(u => `<option value="${escapeHtml(u.id)}">${escapeHtml(unitOptionLabel(u))}</option>`).join('')
@@ -1919,6 +1953,106 @@
       hint.textContent = last ? 'Last unit for ' + name + '. Change it if they are in a different truck.'
         : fromProfile ? 'From ' + name + '\'s profile. Change it if they are in a different truck.'
         : 'No unit on record for ' + name + '. Pick one.'
+    }
+
+    // --- Equipment (0017) -----------------------------------------------------------------
+    async function loadEquipment() {
+      const sel = document.getElementById('equipSelect')
+      const { data, error } = await sb.from('equipment_types')
+        .select('id, name, driver_label, needs_trailer, trailer_kind, confirmed, sort_order').eq('active', true).order('sort_order')
+      if (error) {
+        equipLoaded = false
+        sel.innerHTML = '<option value="">Equipment list unavailable</option>'
+        return
+      }
+      equipTypes = data || []
+      equipLoaded = true
+      sel.innerHTML = '<option value="">Pick the equipment...</option>' + equipTypes.map(t =>
+        `<option value="${escapeHtml(t.id)}">${escapeHtml(equipOptionLabel(t))}</option>`).join('')
+    }
+    const equipOptionLabel = t => t.name + ' — ' + (t.needs_trailer ? 'with ' + (KIND_WORD[t.trailer_kind] || 'trailer') : 'no trailer') + (t.confirmed ? '' : ' (unconfirmed)')
+
+    function trailerOptionsHtml(kind, selectedId) {
+      const match = trailersList.filter(t => t.trailer_kind === kind)
+      const other = trailersList.filter(t => t.trailer_kind !== kind)
+      const opt = t => `<option value="${escapeHtml(t.id)}"${t.id === selectedId ? ' selected' : ''}>${escapeHtml(t.unit_number + (t.make ? ' · ' + t.make : '') + (t.trailer_kind ? '' : ' (kind not tagged)'))}</option>`
+      return `<option value="none"${selectedId ? '' : ' selected'}>Trailer # not known yet</option>` +
+        (match.length ? `<optgroup label="${escapeHtml((KIND_WORD[kind] || 'trailer') + 's')}">${match.map(opt).join('')}</optgroup>` : '') +
+        (other.length ? `<optgroup label="${match.length ? 'Other trailers' : 'Trailers (kind not tagged yet)'}">${other.map(opt).join('')}</optgroup>` : '')
+    }
+
+    function onEquipChange() {
+      const t = equipTypes.find(x => x.id === document.getElementById('equipSelect').value)
+      const field = document.getElementById('trailerField')
+      document.getElementById('equipHint').textContent = t
+        ? 'The driver sees: ' + t.driver_label + ' — ' + (t.needs_trailer ? (t.trailer_kind === 'demo_rock_box' ? 'HOOK UP BOX' : 'HOOK UP TRAILER') : 'no trailer')
+        : ''
+      field.hidden = !(t && t.needs_trailer)
+      if (t && t.needs_trailer) {
+        document.getElementById('trailerLabel').textContent = (KIND_WORD[t.trailer_kind] || 'trailer').replace(/^./, c => c.toUpperCase())
+        document.getElementById('trailerSelect').innerHTML = trailerOptionsHtml(t.trailer_kind, null)
+      }
+    }
+
+    function equipLineHtml(d) {
+      const e = JobKit.equipmentInfo(d)
+      if (!e.set) return '<div class="equip-line unset">Equipment not set' + (d.unit_number ? ' · Unit ' + escapeHtml(d.unit_number) : '') + '</div>'
+      return `<div class="equip-line">${escapeHtml(e.headline)} · ${escapeHtml(e.unit)}${e.trailer ? ' + ' + escapeHtml(e.trailer) : ''}${e.action && e.action !== 'NO TRAILER' ? ' <span class="hook">' + escapeHtml(e.action) + '</span>' : ''}</div>`
+    }
+
+    // Change the equipment (type, truck, trailer) on an open job, and tell the
+    // driver: push + the in-app "Equipment changed" alert on his job screen.
+    function renderModalEquip(d) {
+      const el = document.getElementById('modalEquip')
+      if (!d || d.status !== 'active' || !equipLoaded || !unitsLoaded) { el.innerHTML = ''; return }
+      const typeOpts = '<option value="">Equipment not set</option>' + equipTypes.map(t =>
+        `<option value="${escapeHtml(t.id)}"${t.id === d.equipment_type_id ? ' selected' : ''}>${escapeHtml(equipOptionLabel(t))}</option>`).join('')
+      const unitOpts = '<option value="none">No unit</option>' + unitsList.map(u =>
+        `<option value="${escapeHtml(u.id)}"${u.id === d.unit_id ? ' selected' : ''}>${escapeHtml(unitOptionLabel(u))}</option>`).join('')
+      el.innerHTML = `<div style="width:100%;font-weight:800;font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#6c757d">Equipment on this job</div>
+        <select id="mEqType" aria-label="Equipment">${typeOpts}</select>
+        <select id="mEqUnit" aria-label="Truck">${unitOpts}</select>
+        <select id="mEqTrailer" aria-label="Trailer"></select>
+        <button type="button" id="mEqSave" disabled>Save and tell the driver</button><span class="msg" id="mEqMsg"></span>`
+      const typeSel = el.querySelector('#mEqType'), unitSel = el.querySelector('#mEqUnit'), trSel = el.querySelector('#mEqTrailer')
+      const btn = el.querySelector('#mEqSave'), msg = el.querySelector('#mEqMsg')
+      if (!d.unit_id) unitSel.value = 'none'
+      const syncTrailer = () => {
+        const t = equipTypes.find(x => x.id === typeSel.value)
+        trSel.style.display = t && t.needs_trailer ? '' : 'none'
+        if (t && t.needs_trailer) trSel.innerHTML = trailerOptionsHtml(t.trailer_kind, trSel.value && trSel.value !== 'none' ? trSel.value : d.trailer_unit_id)
+      }
+      syncTrailer()
+      const dirty = () => (typeSel.value || null) !== (d.equipment_type_id || null) ||
+        (unitSel.value === 'none' ? null : unitSel.value) !== (d.unit_id || null) ||
+        (trSel.style.display === 'none' || trSel.value === 'none' ? null : trSel.value) !== (d.trailer_unit_id || null)
+      ;[typeSel, unitSel, trSel].forEach(x => x.addEventListener('change', () => { if (x === typeSel) syncTrailer(); btn.disabled = !dirty(); msg.textContent = '' }))
+      btn.addEventListener('click', async () => {
+        btn.disabled = true; msg.textContent = 'Saving...'
+        const patch = {
+          equipment_type_id: typeSel.value || null,
+          trailer_unit_id: trSel.style.display === 'none' || trSel.value === 'none' ? null : trSel.value
+        }
+        if (unitSel.value === 'none') { patch.unit_id = null; patch.unit_number = null } else patch.unit_id = unitSel.value
+        const { data, error } = await sb.from('dispatches').update(patch).eq('id', d.id).select('*').single()
+        if (error) { msg.textContent = 'Not saved: ' + error.message; btn.disabled = false; return }
+        Object.assign(d, data)
+        if (jobById[d.id]) Object.assign(jobById[d.id], data)
+        msg.textContent = 'Saved'
+        document.getElementById('modalDriver').innerHTML = modalDriverHtml(d)
+        if (data.equipment_type_id) {
+          sb.functions.invoke('send-dispatch-push', { body: { dispatch_id: d.id, driver_id: d.driver_id, reason: 'equipment_changed' } })
+            .then(({ data: res }) => { msg.textContent = res && res.sent ? 'Saved. Driver notified.' : 'Saved. Driver sees it in the app (no push: ' + ((res && (res.reason || res.error)) || 'unknown') + ').' })
+            .catch(() => { msg.textContent = 'Saved. Push failed; the driver still sees it in the app.' })
+        }
+        lastActiveSig = ''
+        loadActiveDispatches()
+      })
+    }
+
+    function modalDriverHtml(d) {
+      const name = (driverMap[d.driver_id] || {}).full_name || 'Unknown driver'
+      return escapeHtml(name) + equipLineHtml(d)
     }
 
     // Change the unit on an open job (job detail).
@@ -2233,8 +2367,15 @@
 
     function unitPayload() {
       const v = document.getElementById('unitSelect').value
-      if (!unitsLoaded || !v) return {}
-      return v === 'none' ? { unit_id: null, unit_number: '' } : { unit_id: v }
+      const out = (!unitsLoaded || !v) ? {} : (v === 'none' ? { unit_id: null, unit_number: '' } : { unit_id: v })
+      // (0017) equipment + trailer travel with the unit
+      const t = equipTypes.find(x => x.id === document.getElementById('equipSelect').value)
+      if (t) {
+        out.equipment_type_id = t.id
+        const tr = document.getElementById('trailerSelect').value
+        out.trailer_unit_id = t.needs_trailer && tr && tr !== 'none' ? tr : null
+      }
+      return out
     }
 
     async function submitDispatch() {
@@ -2247,6 +2388,11 @@
       const pickupName = pickupOpen ? document.getElementById('pickupName').value.trim() : ''
       const pickupAddress = pickupOpen ? (document.getElementById('pickupAddress').value.trim() || pinLabel(pickupLat, pickupLng)) : ''
 
+      if (equipLoaded && !document.getElementById('equipSelect').value) {
+        alert('Pick the equipment first (Tandem, Truck and Pup, ...). The driver needs to know what to take, and each type is priced differently.')
+        document.getElementById('equipSelect').focus()
+        return
+      }
       if (!driverId || !address) {
         alert('Please select a driver and enter a drop-off address or place its pin on the map.')
         return
@@ -2373,7 +2519,8 @@
       // an unconditional rebuild (the old behaviour) would wipe it and steal
       // focus on every 20s poll. See lastActiveSig's declaration.
       const sig = JSON.stringify(data.map(d => [d.id, d.accepted_at, d.site_address, d.notes,
-        d.pickup_name, d.pickup_address, d.picked_up_at, d.pickup_source, d.unit_number]))
+        d.pickup_name, d.pickup_address, d.picked_up_at, d.pickup_source, d.unit_number,
+        d.equipment_type_id, d.equipment_name, d.trailer_number]))
       if (sig === lastActiveSig) { data.forEach(d => { jobById[d.id] = d }); return }
       lastActiveSig = sig
 
@@ -2423,6 +2570,7 @@
               <div class="dispatch-info">
                 <div class="addr">${routeHtml(d)}</div>
                 <div class="meta">${escapeHtml(name)} · sent ${timeStr}</div>
+                ${equipLineHtml(d)}
                 <div class="activity" data-activity-for="${id}"></div>
               </div>
               ${pill}

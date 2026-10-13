@@ -175,6 +175,35 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Equipment (0017): what the driver is driving, from the job's own snapshot.
+  // Mirrors equipmentLine() in supabase/functions/send-dispatch-push; keep the
+  // two in step. Old-build jobs have no equipment: set=false.
+  function equipmentInfo(job) {
+    var d = job || {};
+    if (!d.equipment_name) {
+      return { set: false, headline: 'EQUIPMENT NOT SET', type: null,
+               unit: d.unit_number ? 'Unit ' + d.unit_number : 'Unit not set', trailer: null, action: null,
+               line: 'Equipment not set — ask dispatch what you are taking' };
+    }
+    var head = String(d.equipment_label || d.equipment_name);
+    var unit = d.unit_number ? 'Unit ' + d.unit_number : 'Unit not set';
+    if (d.needs_trailer) {
+      var box = d.trailer_kind === 'demo_rock_box';
+      var trailer = d.trailer_number ? String(d.trailer_number) : (box ? 'box # not set' : 'trailer # not set');
+      var action = box ? 'HOOK UP BOX' : 'HOOK UP TRAILER';
+      return { set: true, headline: head, type: d.equipment_name, unit: unit, trailer: trailer, action: action,
+               line: head + ' — ' + unit + ' + ' + trailer + ' — ' + action };
+    }
+    return { set: true, headline: head, type: d.equipment_name, unit: unit, trailer: null, action: 'NO TRAILER',
+             line: head + ' — ' + unit + ' — no trailer' };
+  }
+  // Signature of what the driver must take: a change means "tell them".
+  function equipmentSig(job) {
+    var d = job || {};
+    return [d.equipment_type_id || '', d.unit_id || d.unit_number || '', d.trailer_unit_id || d.trailer_number || ''].join('|');
+  }
+
+  // ---------------------------------------------------------------------------
   // Outbox. Items: { id, type, dispatch_id, payload, created_at, notBefore,
   // tries, nextAt, state: 'pending' | 'sending' | 'failed', lastError }.
   // `send(item)` resolves { error } from supabase-js; the id is the row's
@@ -316,6 +345,7 @@
   return {
     uuid4: uuid4, navTargets: navTargets, geoUri: geoUri, resolveNotice: resolveNotice, ackKey: ackKey,
     threadItems: threadItems, loadSummary: loadSummary, classifyError: classifyError, backoffMs: backoffMs,
+    equipmentInfo: equipmentInfo, equipmentSig: equipmentSig,
     Outbox: Outbox, APPS: APPS
   };
 });

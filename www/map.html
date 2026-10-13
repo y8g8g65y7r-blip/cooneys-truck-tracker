@@ -136,6 +136,7 @@
   <script src="config.js"></script>
   <script src="legs.js"></script>
   <script src="stops.js"></script>
+  <script src="jobkit.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -411,7 +412,15 @@
       ;(dispatchData || []).slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
         .forEach(d => { if (d.unit_number && !unitByDriver[d.driver_id]) unitByDriver[d.driver_id] = d.unit_number })
       const initials = n => String(n || '?').split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase()
-      const unitText = uid => unitByDriver[uid] ? 'Unit ' + unitByDriver[uid] : 'No unit'
+      // (0017) Equipment on the driver's newest open job: "TANDEM + PUP · Unit 10 + 1101".
+      const jobByDriver = {}
+      ;(dispatchData || []).slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .forEach(d => { if (!jobByDriver[d.driver_id]) jobByDriver[d.driver_id] = d })
+      const equipText = d => {
+        const e = JobKit.equipmentInfo(d)
+        return e.set ? e.headline + ' · ' + e.unit + (e.trailer ? ' + ' + e.trailer : '') : (d.unit_number ? 'Unit ' + d.unit_number : 'No unit') + ' · equipment not set'
+      }
+      const unitText = uid => jobByDriver[uid] ? equipText(jobByDriver[uid]) : (unitByDriver[uid] ? 'Unit ' + unitByDriver[uid] : 'No unit')
 
       // Latest location per driver within the window, plus the recent trail
       // (last TRAIL_MS) per driver in chronological order for the breadcrumb line.
@@ -497,7 +506,7 @@
       const pickupIds = new Set()
       ;(dispatchData || []).forEach(d => {
         const driver = profileMap[d.driver_id]
-        const unitLbl = d.unit_number ? 'Unit ' + d.unit_number : 'No unit'   // the unit on THIS job
+        const unitLbl = equipText(d)   // the equipment + unit (+ trailer) on THIS job (0015/0017)
         const name = driver?.full_name || 'Unknown'
         const accepted = !!d.accepted_at
         const color = accepted ? '#22c55e' : '#eab308'

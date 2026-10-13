@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>Cooney's Trucking — Units</title>
+  <title>Cooney's Trucking — Units &amp; Equipment</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#15161a">
   <link rel="stylesheet" href="theme.css">
@@ -22,16 +22,20 @@
       background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 6px; padding: 8px 14px;
       font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block;
     }
-    .main { max-width: 640px; margin: 0 auto; padding: 20px 16px 48px; }
+    .main { max-width: 680px; margin: 0 auto; padding: 20px 16px 48px; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+    .tab { flex: 1; border: none; border-radius: 10px; padding: 12px; font-size: 14px; font-weight: 800; background: #e9ecef; color: #4b5563; cursor: pointer; font-family: inherit; }
+    .tab.on { background: #15161a; color: #fff; }
     .card { background: #fff; border-radius: 14px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
     .card-title { font-size: 15px; font-weight: 800; color: #15161a; margin-bottom: 4px; }
     .card-sub { font-size: 12.5px; color: #6c757d; margin-bottom: 16px; line-height: 1.45; }
-    .add-row { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; }
-    .add-row input {
-      border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 12px; font-size: 16px; font-family: inherit; outline: none; min-width: 0;
+    .add-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .add-row input, .add-row select {
+      border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 11px; font-size: 16px; font-family: inherit; outline: none; min-width: 0; flex: 1 1 120px;
     }
-    .add-row input:focus { border-color: var(--brand-blue); }
-    .btn-primary { border: none; border-radius: 10px; padding: 0 18px; background: var(--brand-blue); color: #fff; font-size: 14px; font-weight: 800; cursor: pointer; font-family: inherit; }
+    .add-row input:focus, .add-row select:focus { border-color: var(--brand-blue); }
+    .add-row label.chk { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: #374151; flex: 0 0 auto; }
+    .btn-primary { border: none; border-radius: 10px; padding: 0 18px; min-height: 44px; background: var(--brand-blue); color: #fff; font-size: 14px; font-weight: 800; cursor: pointer; font-family: inherit; }
     .btn-primary:disabled { background: #9aa0a6; }
     .msg { font-size: 12.5px; margin-top: 10px; min-height: 16px; font-weight: 600; }
     .msg.err { color: #b91c1c; }
@@ -39,34 +43,37 @@
     .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
     .chip { border: 1.5px solid #e2e8f0; background: #fff; border-radius: 16px; padding: 7px 12px; font-size: 12.5px; font-weight: 700; color: #4b5563; cursor: pointer; font-family: inherit; }
     .chip.on { background: #15161a; border-color: #15161a; color: #fff; }
-    .unit-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #f1f3f5; }
-    .unit-row:first-child { border-top: none; }
-    .unit-no {
+    .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #f1f3f5; flex-wrap: wrap; }
+    .row:first-child { border-top: none; }
+    .no {
       flex-shrink: 0; min-width: 56px; text-align: center; font-size: 15px; font-weight: 900; color: #fff;
       background: var(--brand-blue); border-radius: 8px; padding: 8px 6px;
     }
-    .unit-row.retired .unit-no { background: #9aa0a6; }
-    .unit-info { flex: 1; min-width: 0; }
-    .unit-info .l1 { font-size: 13.5px; font-weight: 700; color: #15161a; overflow-wrap: anywhere; }
-    .unit-info .l2 { font-size: 12px; color: #6c757d; overflow-wrap: anywhere; margin-top: 2px; }
+    .row.trailer .no { background: #b45309; }
+    .row.retired .no { background: #9aa0a6; }
+    .info { flex: 1; min-width: 160px; }
+    .info .l1 { font-size: 13.5px; font-weight: 700; color: #15161a; overflow-wrap: anywhere; }
+    .info .l2 { font-size: 12px; color: #6c757d; overflow-wrap: anywhere; margin-top: 2px; }
     .tag { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; padding: 2px 7px; border-radius: 6px; margin-left: 6px; vertical-align: 1px; }
     .tag.unconfirmed { background: #fff7ed; color: #9a3412; }
     .tag.retired { background: #f1f3f5; color: #6c757d; }
-    .acts { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
-    .acts button {
-      border: 1.5px solid #dde2e8; background: #fff; border-radius: 8px; padding: 8px 10px; font-size: 12px; font-weight: 700;
-      color: #15161a; cursor: pointer; font-family: inherit; min-height: 36px;
+    .tag.ok { background: #f0fdf4; color: #15803d; }
+    .acts { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+    .acts button, .acts select {
+      border: 1.5px solid #dde2e8; background: #fff; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; font-weight: 700;
+      color: #15161a; cursor: pointer; font-family: inherit; min-height: 38px;
     }
     .acts button.confirm { border-color: #bbf7d0; color: #15803d; }
     .acts button.retire { color: #b91c1c; }
     .empty { font-size: 13px; color: #9aa0a6; text-align: center; padding: 16px 0; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="header-left">
       <img src="logo.png" alt="Cooney's" class="header-img" width="51" height="34">
-      <div class="header-logo">UNITS</div>
+      <div class="header-logo">UNITS &amp; EQUIPMENT</div>
     </div>
     <div class="header-right">
       <a href="dispatcher.html" class="btn-nav">Dispatch</a>
@@ -76,28 +83,57 @@
   </div>
 
   <div class="main">
-    <div class="card">
-      <div class="card-title">Add a unit</div>
-      <div class="card-sub">Units belong to jobs, not to drivers: dispatch picks the unit each time it sends a job. Add a truck here and it shows up in the Unit list on the dispatch screen.</div>
-      <form class="add-row" id="addForm">
-        <input id="newNumber" placeholder="Unit #" maxlength="20" autocomplete="off" aria-label="Unit number" required>
-        <input id="newMake" placeholder="Make / model (optional)" maxlength="80" autocomplete="off" aria-label="Make and model">
-        <button class="btn-primary" type="submit" id="addBtn">Add</button>
-      </form>
-      <div class="msg" id="addMsg"></div>
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-tab="power" role="tab">Trucks</button>
+      <button class="tab" data-tab="trailer" role="tab">Trailers</button>
+      <button class="tab" data-tab="equip" role="tab">Equipment</button>
     </div>
 
-    <div class="card">
-      <div class="card-title">Units</div>
-      <div class="card-sub">Retired units stay on the jobs they were used on. "Unconfirmed" units came from a driver's old app profile and are not on the Axon list yet; confirm them when you know they are real trucks.</div>
-      <div class="filters" id="filters">
-        <button class="chip on" data-f="active">Active</button>
-        <button class="chip" data-f="unconfirmed">Unconfirmed</button>
-        <button class="chip" data-f="retired">Retired</button>
-        <button class="chip" data-f="all">All</button>
+    <!-- Trucks + trailers share one list UI -->
+    <div id="unitsPane">
+      <div class="card">
+        <div class="card-title" id="addTitle">Add a truck</div>
+        <div class="card-sub" id="addSub">Units belong to jobs, not drivers: dispatch picks the truck each time it sends a job.</div>
+        <form class="add-row" id="addForm">
+          <input id="newNumber" placeholder="Unit #" maxlength="20" autocomplete="off" aria-label="Unit number" required>
+          <input id="newMake" placeholder="Make / model (optional)" maxlength="80" autocomplete="off" aria-label="Make and model">
+          <select id="newKind" aria-label="Trailer kind" hidden></select>
+          <button class="btn-primary" type="submit" id="addBtn">Add</button>
+        </form>
+        <div class="msg" id="addMsg"></div>
       </div>
-      <div id="list"><div class="empty">Loading units...</div></div>
-      <div class="msg" id="listMsg"></div>
+      <div class="card">
+        <div class="card-title" id="listTitle">Trucks</div>
+        <div class="card-sub" id="listSub">Retired units stay on the jobs they were used on.</div>
+        <div class="filters" id="filters">
+          <button class="chip on" data-f="active">Active</button>
+          <button class="chip" data-f="untagged" hidden>Kind not tagged</button>
+          <button class="chip" data-f="retired">Retired</button>
+          <button class="chip" data-f="all">All</button>
+        </div>
+        <div id="list"><div class="empty">Loading...</div></div>
+        <div class="msg" id="listMsg"></div>
+      </div>
+    </div>
+
+    <!-- Equipment types -->
+    <div id="equipPane" hidden>
+      <div class="card">
+        <div class="card-title">Equipment types</div>
+        <div class="card-sub">The configurations dispatch picks first on every job, named exactly as on the hourly rate sheet. "Trailer" tells the driver what to hook up. No prices are kept in the app. Order = the order dispatch sees.</div>
+        <div id="eqList"><div class="empty">Loading...</div></div>
+        <div class="msg" id="eqMsg"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Add an equipment type</div>
+        <form class="add-row" id="eqAdd">
+          <input id="eqName" placeholder="Name (as on the rate sheet)" maxlength="80" required aria-label="Name">
+          <input id="eqLabel" placeholder="Driver sees, e.g. TANDEM + PUP" maxlength="60" required aria-label="Driver label">
+          <select id="eqKind" aria-label="Trailer"></select>
+          <button class="btn-primary" type="submit">Add</button>
+        </form>
+        <div class="msg" id="eqAddMsg"></div>
+      </div>
     </div>
   </div>
 
@@ -105,41 +141,73 @@
   <script src="config.js"></script>
   <script>
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    let units = []
-    let filter = 'active'
     const $ = id => document.getElementById(id)
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     const byNumber = (a, b) => String(a.unit_number).localeCompare(String(b.unit_number), undefined, { numeric: true })
+    const KINDS = [['pup', 'Pup'], ['quad', 'Quad'], ['end_dump', 'End-dump trailer'], ['demo_rock_box', 'Demo / rock box'], ['low_bed', 'Low bed'], ['other', 'Other']]
+    const kindName = k => (KINDS.find(x => x[0] === k) || [null, 'No trailer'])[1]
+    let tab = 'power', filter = 'active', units = [], types = []
 
     sb.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { window.location.href = 'index.html'; return }
       const { data: profile } = await sb.from('profiles').select('role').eq('id', session.user.id).single()
       // Office staff only (no account holds the separate 'admin' role today).
       if (profile?.role !== 'admin' && profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
+      $('newKind').innerHTML = '<option value="">Kind not known</option>' + KINDS.map(k => `<option value="${k[0]}">${k[1]}</option>`).join('')
+      $('eqKind').innerHTML = '<option value="none">No trailer</option>' + KINDS.map(k => `<option value="${k[0]}">Trailer: ${k[1]}</option>`).join('')
       load()
     })
 
+    // ---- tabs ---------------------------------------------------------------
+    document.querySelector('.tabs').addEventListener('click', e => {
+      const b = e.target.closest('[data-tab]'); if (!b) return
+      tab = b.dataset.tab; filter = 'active'
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === b))
+      document.querySelectorAll('#filters .chip').forEach(c => c.classList.toggle('on', c.dataset.f === 'active'))
+      $('unitsPane').hidden = tab === 'equip'
+      $('equipPane').hidden = tab !== 'equip'
+      const tr = tab === 'trailer'
+      $('addTitle').textContent = tr ? 'Add a trailer' : 'Add a truck'
+      $('addSub').textContent = tr ? 'Trailers are picked on jobs whose equipment hooks one up (pup, quad, end dump, demo/rock box).'
+        : 'Units belong to jobs, not drivers: dispatch picks the truck each time it sends a job.'
+      $('listTitle').textContent = tr ? 'Trailers' : 'Trucks'
+      $('newKind').hidden = !tr
+      document.querySelector('#filters [data-f="untagged"]').hidden = !tr
+      render()
+    })
+
     async function load() {
-      const { data, error } = await sb.from('units').select('id, unit_number, year, make, plate, active, confirmed, source, note').order('unit_number')
-      if (error) { $('list').innerHTML = '<div class="empty">Could not load units: ' + escapeHtml(error.message) + '</div>'; return }
-      units = (data || []).sort(byNumber)
+      const [u, t] = await Promise.all([
+        sb.from('units').select('id, unit_number, year, make, plate, active, confirmed, source, note, kind, trailer_kind'),
+        sb.from('equipment_types').select('id, name, driver_label, needs_trailer, trailer_kind, confirmed, active, sort_order, note').order('sort_order')
+      ])
+      if (u.error) { $('list').innerHTML = '<div class="empty">Could not load units: ' + escapeHtml(u.error.message) + '</div>'; return }
+      units = (u.data || []).sort(byNumber)
+      types = t.error ? [] : (t.data || [])
       render()
     }
 
-    function render() {
-      const rows = units.filter(u =>
-        filter === 'all' ? true : filter === 'retired' ? !u.active : filter === 'unconfirmed' ? (u.active && !u.confirmed) : u.active)
+    function render() { if (tab === 'equip') renderTypes(); else renderUnits() }
+
+    // ---- trucks / trailers ---------------------------------------------------------
+    function renderUnits() {
+      const kind = tab
+      const rows = units.filter(u => (u.kind || 'power') === kind).filter(u =>
+        filter === 'all' ? true : filter === 'retired' ? !u.active : filter === 'untagged' ? (u.active && !u.trailer_kind) : u.active)
       if (!rows.length) { $('list').innerHTML = '<div class="empty">Nothing here.</div>'; return }
       $('list').innerHTML = rows.map(u => {
-        const l1 = [u.year, u.make].filter(Boolean).join(' ') || (u.source === 'app' ? 'From an app driver profile' : 'No details')
+        const l1 = [u.year, u.make].filter(Boolean).join(' ') || 'No details'
         const l2 = [u.plate ? 'Plate ' + u.plate : null, u.note].filter(Boolean).join(' · ')
-        return `<div class="unit-row${u.active ? '' : ' retired'}" data-id="${escapeHtml(u.id)}">
-          <div class="unit-no">${escapeHtml(u.unit_number)}</div>
-          <div class="unit-info">
+        const kindSel = kind === 'trailer' ? `<select data-kind aria-label="Trailer kind for ${escapeHtml(u.unit_number)}">
+            <option value="">Kind not tagged</option>${KINDS.map(k => `<option value="${k[0]}"${u.trailer_kind === k[0] ? ' selected' : ''}>${k[1]}</option>`).join('')}</select>` : ''
+        return `<div class="row ${kind}${u.active ? '' : ' retired'}" data-id="${escapeHtml(u.id)}">
+          <div class="no">${escapeHtml(u.unit_number)}</div>
+          <div class="info">
             <div class="l1">${escapeHtml(l1)}${!u.active ? '<span class="tag retired">Retired</span>' : (!u.confirmed ? '<span class="tag unconfirmed">Unconfirmed</span>' : '')}</div>
             ${l2 ? `<div class="l2">${escapeHtml(l2)}</div>` : ''}
           </div>
           <div class="acts">
+            ${kindSel}
             ${u.active && !u.confirmed ? '<button class="confirm" data-act="confirm">Confirm</button>' : ''}
             <button data-act="note">Note</button>
             ${u.active ? '<button class="retire" data-act="retire">Retire</button>' : '<button data-act="reactivate">Reactivate</button>'}
@@ -155,50 +223,134 @@
       render()
     })
 
-    $('list').addEventListener('click', async e => {
-      const b = e.target.closest('button[data-act]'); if (!b) return
-      const id = b.closest('[data-id]').dataset.id
-      const u = units.find(x => x.id === id); if (!u) return
-      let patch = null
-      if (b.dataset.act === 'confirm') patch = { confirmed: true }
-      else if (b.dataset.act === 'retire') {
-        if (!confirm('Retire unit ' + u.unit_number + '? It disappears from the dispatch Unit list. Jobs it was used on keep it.')) return
-        patch = { active: false }
-      } else if (b.dataset.act === 'reactivate') patch = { active: true }
-      else if (b.dataset.act === 'note') {
-        const n = prompt('Note for unit ' + u.unit_number + ' (blank to clear):', u.note || '')
-        if (n === null) return
-        patch = { note: n.trim().slice(0, 300) || null }
-      }
-      b.disabled = true
+    async function saveUnit(id, patch, el) {
+      if (el) el.disabled = true
       const { error } = await sb.from('units').update(patch).eq('id', id)
       if (error) {
         $('listMsg').className = 'msg err'
-        $('listMsg').textContent = /duplicate|unique/i.test(error.message)
-          ? 'Another active unit already uses number ' + u.unit_number + '. Retire that one first.'
-          : 'Not saved: ' + error.message
-        b.disabled = false
+        $('listMsg').textContent = /duplicate|unique/i.test(error.message) ? 'Another active unit already uses that number. Retire that one first.' : 'Not saved: ' + error.message
+        if (el) el.disabled = false
         return
       }
       $('listMsg').className = 'msg ok'; $('listMsg').textContent = 'Saved.'
       load()
+    }
+
+    $('list').addEventListener('change', e => {
+      const s = e.target.closest('select[data-kind]'); if (!s) return
+      saveUnit(s.closest('[data-id]').dataset.id, { trailer_kind: s.value || null }, s)
+    })
+    $('list').addEventListener('click', e => {
+      const b = e.target.closest('button[data-act]'); if (!b) return
+      const id = b.closest('[data-id]').dataset.id
+      const u = units.find(x => x.id === id); if (!u) return
+      if (b.dataset.act === 'confirm') return saveUnit(id, { confirmed: true }, b)
+      if (b.dataset.act === 'reactivate') return saveUnit(id, { active: true }, b)
+      if (b.dataset.act === 'retire') {
+        if (!confirm('Retire ' + u.unit_number + '? It disappears from the dispatch pickers. Jobs it was used on keep it.')) return
+        return saveUnit(id, { active: false }, b)
+      }
+      if (b.dataset.act === 'note') {
+        const n = prompt('Note for ' + u.unit_number + ' (blank to clear):', u.note || '')
+        if (n === null) return
+        return saveUnit(id, { note: n.trim().slice(0, 300) || null }, b)
+      }
     })
 
     $('addForm').addEventListener('submit', async e => {
       e.preventDefault()
       const unit_number = $('newNumber').value.trim()
-      const make = $('newMake').value.trim() || null
       if (!unit_number) return
+      const row = { unit_number, make: $('newMake').value.trim() || null, kind: tab === 'trailer' ? 'trailer' : 'power' }
+      if (tab === 'trailer' && $('newKind').value) row.trailer_kind = $('newKind').value
       $('addBtn').disabled = true
-      const { error } = await sb.from('units').insert({ unit_number, make })
+      const { error } = await sb.from('units').insert(row)
       $('addBtn').disabled = false
       if (error) {
         $('addMsg').className = 'msg err'
-        $('addMsg').textContent = /duplicate|unique/i.test(error.message) ? 'Unit ' + unit_number + ' is already on the list.' : 'Not added: ' + error.message
+        $('addMsg').textContent = /duplicate|unique/i.test(error.message) ? unit_number + ' is already on the list.' : 'Not added: ' + error.message
         return
       }
-      $('addMsg').className = 'msg ok'; $('addMsg').textContent = 'Unit ' + unit_number + ' added.'
+      $('addMsg').className = 'msg ok'; $('addMsg').textContent = unit_number + ' added.'
       $('newNumber').value = ''; $('newMake').value = ''
+      load()
+    })
+
+    // ---- equipment types ----------------------------------------------------------
+    function renderTypes() {
+      if (!types.length) { $('eqList').innerHTML = '<div class="empty">No equipment types.</div>'; return }
+      const ordered = types.slice().sort((a, b) => (b.active - a.active) || a.sort_order - b.sort_order)
+      $('eqList').innerHTML = ordered.map((t, i) => `<div class="row${t.active ? '' : ' retired'}" data-eq="${escapeHtml(t.id)}">
+          <div class="info">
+            <div class="l1">${escapeHtml(t.name)}${!t.active ? '<span class="tag retired">Retired</span>' : (t.confirmed ? '<span class="tag ok">Confirmed</span>' : '<span class="tag unconfirmed">Unconfirmed</span>')}</div>
+            <div class="l2">Driver sees: ${escapeHtml(t.driver_label)} · ${t.needs_trailer ? 'hooks up a ' + escapeHtml(kindName(t.trailer_kind).toLowerCase()) : 'no trailer'}${t.note ? ' · ' + escapeHtml(t.note) : ''}</div>
+          </div>
+          <div class="acts">
+            <select data-eqkind aria-label="Trailer for ${escapeHtml(t.name)}">
+              <option value="none"${t.needs_trailer ? '' : ' selected'}>No trailer</option>
+              ${KINDS.map(k => `<option value="${k[0]}"${t.needs_trailer && t.trailer_kind === k[0] ? ' selected' : ''}>Trailer: ${k[1]}</option>`).join('')}
+            </select>
+            ${t.active && !t.confirmed ? '<button class="confirm" data-eqact="confirm">Confirm</button>' : ''}
+            ${t.active ? `<button data-eqact="up" ${i === 0 ? 'disabled' : ''} aria-label="Move up">▲</button><button data-eqact="down" aria-label="Move down">▼</button>` : ''}
+            <button data-eqact="label">Driver label</button>
+            ${t.active ? '<button class="retire" data-eqact="retire">Retire</button>' : '<button data-eqact="reactivate">Reactivate</button>'}
+          </div>
+        </div>`).join('')
+    }
+
+    async function saveType(id, patch, el) {
+      if (el) el.disabled = true
+      const { error } = await sb.from('equipment_types').update(patch).eq('id', id)
+      if (error) { $('eqMsg').className = 'msg err'; $('eqMsg').textContent = 'Not saved: ' + error.message; if (el) el.disabled = false; return }
+      $('eqMsg').className = 'msg ok'; $('eqMsg').textContent = 'Saved.'
+      load()
+    }
+
+    $('eqList').addEventListener('change', e => {
+      const s = e.target.closest('select[data-eqkind]'); if (!s) return
+      // One change: trailer on/off + kind together (they must agree).
+      saveType(s.closest('[data-eq]').dataset.eq, s.value === 'none' ? { needs_trailer: false, trailer_kind: 'none' } : { needs_trailer: true, trailer_kind: s.value }, s)
+    })
+    $('eqList').addEventListener('click', async e => {
+      const b = e.target.closest('button[data-eqact]'); if (!b) return
+      const id = b.closest('[data-eq]').dataset.eq
+      const t = types.find(x => x.id === id); if (!t) return
+      const act = b.dataset.eqact
+      if (act === 'confirm') return saveType(id, { confirmed: true }, b)
+      if (act === 'reactivate') return saveType(id, { active: true }, b)
+      if (act === 'retire') {
+        if (!confirm('Retire "' + t.name + '"? Dispatch can no longer pick it. Jobs that used it keep it.')) return
+        return saveType(id, { active: false }, b)
+      }
+      if (act === 'label') {
+        const v = prompt('What the driver sees for "' + t.name + '" (e.g. TANDEM + PUP):', t.driver_label)
+        if (v === null || !v.trim()) return
+        return saveType(id, { driver_label: v.trim().toUpperCase().slice(0, 60) }, b)
+      }
+      if (act === 'up' || act === 'down') {
+        const act_ = types.filter(x => x.active).sort((a, z) => a.sort_order - z.sort_order)
+        const i = act_.findIndex(x => x.id === id), j = act === 'up' ? i - 1 : i + 1
+        if (j < 0 || j >= act_.length) return
+        b.disabled = true
+        const a = act_[i], z = act_[j]
+        const ao = a.sort_order === z.sort_order ? z.sort_order + (act === 'up' ? -1 : 1) : z.sort_order
+        await sb.from('equipment_types').update({ sort_order: ao }).eq('id', a.id)
+        await sb.from('equipment_types').update({ sort_order: a.sort_order }).eq('id', z.id)
+        load()
+      }
+    })
+
+    $('eqAdd').addEventListener('submit', async e => {
+      e.preventDefault()
+      const kind = $('eqKind').value
+      const max = types.reduce((m, t) => Math.max(m, t.sort_order || 0), 0)
+      const row = { name: $('eqName').value.trim(), driver_label: $('eqLabel').value.trim().toUpperCase(),
+        needs_trailer: kind !== 'none', trailer_kind: kind, sort_order: max + 10, confirmed: true }
+      if (!row.name || !row.driver_label) return
+      const { error } = await sb.from('equipment_types').insert(row)
+      if (error) { $('eqAddMsg').className = 'msg err'; $('eqAddMsg').textContent = /duplicate|unique/i.test(error.message) ? '"' + row.name + '" already exists.' : 'Not added: ' + error.message; return }
+      $('eqAddMsg').className = 'msg ok'; $('eqAddMsg').textContent = '"' + row.name + '" added.'
+      $('eqName').value = ''; $('eqLabel').value = ''
       load()
     })
   </script>

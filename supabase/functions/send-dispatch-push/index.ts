@@ -38,6 +38,22 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { MAX_ALERT_BODY, sendApnsPush } from '../_shared/apns.ts'
 
+// (0017) What the driver is driving, in one line. Mirrors JobKit.equipmentLine()
+// in www/jobkit.js; keep the two in step. null = the job has no equipment set
+// (sent from an older dispatcher build).
+// deno-lint-ignore no-explicit-any
+function equipmentLine(d: Record<string, any>): string | null {
+  if (!d.equipment_name) return null
+  const head = String(d.equipment_label || d.equipment_name)
+  const unit = d.unit_number ? `Unit ${d.unit_number}` : 'Unit not set'
+  if (d.needs_trailer) {
+    const box = d.trailer_kind === 'demo_rock_box'
+    const trailer = d.trailer_number ? ` + ${d.trailer_number}` : (box ? ' + box # not set' : ' + trailer # not set')
+    return `${head} — ${unit}${trailer} — ${box ? 'HOOK UP BOX' : 'HOOK UP TRAILER'}`
+  }
+  return `${head} — ${unit} — no trailer`
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const corsHeaders = {
@@ -117,7 +133,7 @@ Deno.serve(async (req) => {
     // from ever diverging, and guarantees every push is backed by a real row.
     const { data: dispatch, error: dispatchErr } = await admin
       .from('dispatches')
-      .select('id, driver_id, site_address, status, pickup_name, pickup_address')
+      .select('*')   // equipment + unit columns (0015/0017); '*' also works before they exist
       .eq('id', dispatchId)
       .maybeSingle()
 
@@ -167,21 +183,34 @@ Deno.serve(async (req) => {
       return json({ ok: true, sent: false, reason: 'Driver has no registered device yet' }, 200)
     }
 
+    // (0017) The equipment line goes in the TITLE, so the driver knows what to
+    // take before walking to the yard. A dispatcher editing the equipment on an
+    // open job sends reason 'equipment_changed' and the driver gets that alone.
+    const line = equipmentLine(dispatch)
+    const changed = body.reason === 'equipment_changed'
+    if (changed && !line) {
+      return json({ ok: true, sent: false, reason: 'No equipment on this job to announce' }, 200)
+    }
+    const alert = changed
+      ? { title: 'Equipment changed', body: `Now: ${line}`.slice(0, MAX_ALERT_BODY) }
+      : { title: line ? line.slice(0, 120) : 'New Dispatch', body: address }
+
     const result = await sendApnsPush(
       { teamId: APNS_TEAM_ID, keyId: APNS_KEY_ID, authKey: APNS_AUTH_KEY },
       deviceToken,
       {
         aps: {
-          alert: { title: 'New Dispatch', body: address },
+          alert,
           sound: 'default',
         },
-        type: 'dispatch',
+        type: changed ? 'equipment' : 'dispatch',
         dispatch_id: dispatchId,
       },
       {
         // Re-sending the same job replaces its banner instead of stacking a
-        // second indistinguishable one.
-        collapseId: dispatchId,
+        // second indistinguishable one. An equipment change has its own slot so
+        // it never silently replaces the original job alert.
+        collapseId: changed ? dispatchId + ':eq' : dispatchId,
       },
     )
 

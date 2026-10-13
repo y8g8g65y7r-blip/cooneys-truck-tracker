@@ -163,6 +163,18 @@ const t = async (name, fn) => { await fn(); n++; console.log('ok  ' + name) }
     const ob = new K.Outbox({ storage: st, key: 'k', send: async () => ({}) })
     assert.strictEqual(ob.items()[0].state, 'pending')
   })
+  await t('equipment line: trailer, box, tandem, not set', () => {
+    const tp = { equipment_name: 'Truck and Pup (Tri)', equipment_label: 'TANDEM + PUP', needs_trailer: true, trailer_kind: 'pup', unit_number: '10', trailer_number: '1101' }
+    assert.strictEqual(K.equipmentInfo(tp).line, 'TANDEM + PUP — Unit 10 + 1101 — HOOK UP TRAILER')
+    const box = { equipment_name: 'Rock / Concrete Tri End Dump', equipment_label: 'TANDEM + DEMO/ROCK BOX', needs_trailer: true, trailer_kind: 'demo_rock_box', unit_number: '10' }
+    assert.strictEqual(K.equipmentInfo(box).line, 'TANDEM + DEMO/ROCK BOX — Unit 10 + box # not set — HOOK UP BOX')
+    const tan = { equipment_name: 'Tandem', equipment_label: 'TANDEM', needs_trailer: false, trailer_kind: 'none', unit_number: '10' }
+    assert.strictEqual(K.equipmentInfo(tan).line, 'TANDEM — Unit 10 — no trailer')
+    const old = { unit_number: '98' }
+    assert.strictEqual(K.equipmentInfo(old).set, false)
+    assert.strictEqual(K.equipmentInfo(old).headline, 'EQUIPMENT NOT SET')
+    assert.notStrictEqual(K.equipmentSig(tp), K.equipmentSig(Object.assign({}, tp, { trailer_number: '1102' })))
+  })
   await t('uuid4 shape', () => { assert.ok(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(K.uuid4())) })
 
   console.log(`\n${n} passed`)
