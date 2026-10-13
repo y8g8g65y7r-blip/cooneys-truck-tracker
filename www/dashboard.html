@@ -395,7 +395,7 @@
       opacity: 0; visibility: hidden; transition: transform 0.22s ease, opacity 0.22s ease, visibility 0s linear 0.22s;
       z-index: 3800; background: #15161a; color: #fff; border-radius: 14px; padding: 12px 14px 12px 16px;
       display: flex; align-items: center; gap: 14px; font-size: 14px; font-weight: 700;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.35); max-width: calc(100% - 24px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35); width: max-content; max-width: calc(100vw - 24px);
       border: 1px solid rgba(255,255,255,0.12);
     }
     .toast.show { transform: translate(-50%, 0); opacity: 1; visibility: visible; transition: transform 0.22s ease, opacity 0.22s ease; }
@@ -1808,7 +1808,7 @@
       lastLoadTap = { id: d.id, kind: kind, at: now }
       const it = outbox.enqueue({ type: 'load_event', dispatch_id: d.id, delayMs: LOAD_UNDO_MS,
         payload: { kind: kind, event_at: new Date(now).toISOString() } })
-      showToast(kindLabel(kind) + ' ' + clock(now) + ' — dispatch will see it', 'Undo', () => undoLoad(it.id), LOAD_UNDO_MS)
+      showToast(kindLabel(kind) + ' at ' + clock(now), 'Undo', () => undoLoad(it.id), LOAD_UNDO_MS)
       setTimeout(() => { outbox.flush({ force: true }); refreshJobBits() }, LOAD_UNDO_MS + 100)
       refreshJobBits()
     }
@@ -2070,7 +2070,11 @@
 
     // --- Maps: where the driver is + the stops. No route line, ever. ---------------
     let homeMap = null, jobMap = null, homeLayer = null, jobLayer = null
-    let homeMe = null, jobMe = null, homeFitted = false, jobFittedFor = null, lastMarkerAt = 0
+    // A map is re-fitted when WHAT it must show changes (which pins, whether we
+    // have a fix yet), never just because the truck moved: the driver may have
+    // panned. Keyed by a signature, so a fix that lands before the job list
+    // (common at launch) cannot leave the map zoomed on the truck alone.
+    let homeMe = null, jobMe = null, homeFitSig = null, jobFitSig = null, lastMarkerAt = 0
     const leafletOk = () => typeof window.L !== 'undefined' && !!window.L.map
     // Leaflet loads async (a slow CDN must never hold up the job list); the
     // maps appear when it lands, or say why not.
@@ -2122,9 +2126,10 @@
           L.marker(s.ll, { icon: pinIcon(s.cls, s.label), title: s.title, keyboard: false }).addTo(homeLayer); pts.push(s.ll)
         })
       })
+      const sig = JSON.stringify(pts) + (lastFix ? '|me' : '')
       if (lastFix) pts.push([lastFix.lat, lastFix.lng])
       placeMe()
-      if (visible && !homeFitted && pts.length) { fitTo(homeMap, pts); homeFitted = !!lastFix }
+      if (visible && pts.length && sig !== homeFitSig) { fitTo(homeMap, pts); homeFitSig = sig }
     }
 
     function ensureJobMap() {
@@ -2143,11 +2148,12 @@
           L.marker(s.ll, { icon: pinIcon(s.cls, s.label), title: s.title, keyboard: false }).addTo(jobLayer); pts.push(s.ll)
         })
       }
+      const sig = openJobId + JSON.stringify(pts) + (lastFix ? '|me' : '')
       if (lastFix) pts.push([lastFix.lat, lastFix.lng])
       placeMe()
-      if (refit || jobFittedFor !== openJobId) { fitTo(jobMap, pts); jobFittedFor = pts.length ? openJobId : null }
+      if (pts.length && (refit || sig !== jobFitSig)) { fitTo(jobMap, pts); jobFitSig = sig }
     }
-    $('homeRecenter').addEventListener('click', () => { homeFitted = false; updateHomeMap() })
+    $('homeRecenter').addEventListener('click', () => { homeFitSig = null; updateHomeMap() })
 
     function placeMe() {
       if (!lastFix) return
@@ -2162,7 +2168,7 @@
       lastMarkerAt = now
       const first = !homeMe && !jobMe
       placeMe()
-      if (first) { if (!homeFitted) updateHomeMap(); if (openJobId) updateJobMap(true) }
+      if (first) { updateHomeMap(); if (openJobId) updateJobMap(false) }
     }
 
     async function toggleHistory() {
