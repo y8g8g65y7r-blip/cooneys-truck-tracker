@@ -404,6 +404,15 @@
       const profileMap = {}
       profileData?.forEach(p => { profileMap[p.id] = p })
 
+      // (0015) A truck's label is the unit on the driver's ACTIVE job (newest
+      // first), never a unit fixed to the person. No active job with a unit:
+      // the pin shows the driver's initials and the text says "No unit".
+      const unitByDriver = {}
+      ;(dispatchData || []).slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .forEach(d => { if (d.unit_number && !unitByDriver[d.driver_id]) unitByDriver[d.driver_id] = d.unit_number })
+      const initials = n => String(n || '?').split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+      const unitText = uid => unitByDriver[uid] ? 'Unit ' + unitByDriver[uid] : 'No unit'
+
       // Latest location per driver within the window, plus the recent trail
       // (last TRAIL_MS) per driver in chronological order for the breadcrumb line.
       const latestByUser = {}
@@ -444,7 +453,7 @@
       shownIds.forEach(uid => {
         const loc = latestByUser[uid]
         const profile = profileMap[uid]
-        const unit = profile?.unit_number || '?'
+        const unit = unitByDriver[uid] || initials(profile?.full_name)
         const name = profile?.full_name || 'Unknown'
         const lat = parseFloat(loc.lat)
         const lng = parseFloat(loc.lng)
@@ -467,7 +476,7 @@
           iconAnchor: [8, 38]
         })
 
-        const popup = `<b>Unit ${escapeHtml(unit)}</b> — ${escapeHtml(name)}<br>${freshStr} (${timeStr})${speedStr}<br>±${Math.round(loc.accuracy || 0)}m accuracy`
+        const popup = `<b>${escapeHtml(unitText(uid))}</b> — ${escapeHtml(name)}<br>${freshStr} (${timeStr})${speedStr}<br>±${Math.round(loc.accuracy || 0)}m accuracy`
           + (idle ? `<br><b style="color:#b45309">Not moved for ${idle.minutes} min</b>${idle.notified ? ' — driver alerted' : ''}` : '')
 
         if (markers[uid]) {
@@ -488,7 +497,7 @@
       const pickupIds = new Set()
       ;(dispatchData || []).forEach(d => {
         const driver = profileMap[d.driver_id]
-        const unit = driver?.unit_number || '?'
+        const unitLbl = d.unit_number ? 'Unit ' + d.unit_number : 'No unit'   // the unit on THIS job
         const name = driver?.full_name || 'Unknown'
         const accepted = !!d.accepted_at
         const color = accepted ? '#22c55e' : '#eab308'
@@ -523,7 +532,7 @@
             iconSize: [32, 32],
             iconAnchor: [16, 32]
           })
-          const popup = `<b>${accepted ? '✓ Accepted' : 'Pending'}</b>${stageStr} — Unit ${escapeHtml(unit)} (${escapeHtml(name)})<br>`
+          const popup = `<b>${accepted ? '✓ Accepted' : 'Pending'}</b>${stageStr} — ${escapeHtml(unitLbl)} (${escapeHtml(name)})<br>`
             + (twoStop ? '<b>Drop-off:</b> ' : '') + `${escapeHtml(d.site_address)}${d.notes ? '<br>' + escapeHtml(d.notes) : ''}`
             + (next && next.kind === 'dropoff' ? etaStr : '')
           if (dispatchMarkers[d.id]) {
@@ -550,7 +559,7 @@
             iconSize: [30, 30],
             iconAnchor: [15, 15]
           })
-          const popup = `<b>Pickup${done ? ' — ' + escapeHtml(loadedStr) : ''}</b> — Unit ${escapeHtml(unit)} (${escapeHtml(name)})<br>`
+          const popup = `<b>Pickup${done ? ' — ' + escapeHtml(loadedStr) : ''}</b> — ${escapeHtml(unitLbl)} (${escapeHtml(name)})<br>`
             + `${escapeHtml(DispatchStops.pickupLabel(d))}${d.pickup_name ? '<br>' + escapeHtml(d.pickup_address) : ''}`
             + `<br>Then to: ${escapeHtml(d.site_address)}`
             + (next && next.kind === 'pickup' ? etaStr : '')
@@ -639,12 +648,11 @@
           const active = (now - new Date(loc.created_at).getTime()) < LIVE_MS
           const idle = active ? idleByUser[uid] : null
           const profile = profileMap[uid]
-          const unit = profile?.unit_number || '?'
           const name = profile?.full_name || 'Unknown'
           const timeStr = new Date(loc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           return `<div class="roster-chip${idle ? ' idle' : ''}">
             <div class="dot${idle ? ' idle' : (active ? '' : ' offline')}"></div>
-            Unit ${escapeHtml(unit)} — ${escapeHtml(name)}
+            ${escapeHtml(unitText(uid))} — ${escapeHtml(name)}
             <span class="time">${idle ? 'Parked ' + idle.minutes + 'm' : (active ? 'Live' : timeStr)}</span>
           </div>`
         }).join('')
@@ -653,7 +661,7 @@
       // One clear line for the thing dispatch is actually watching for.
       const idleList = rosterUsers
         .filter(uid => idleByUser[uid] && (now - new Date(latestByUser[uid].created_at).getTime()) < LIVE_MS)
-        .map(uid => 'Unit ' + ((profileMap[uid] || {}).unit_number || '?') + ' (' + idleByUser[uid].minutes + ' min)')
+        .map(uid => (unitByDriver[uid] ? 'Unit ' + unitByDriver[uid] : ((profileMap[uid] || {}).full_name || 'Driver')) + ' (' + idleByUser[uid].minutes + ' min)')
       const strip = document.getElementById('idleStrip')
       if (idleList.length) {
         strip.textContent = (idleList.length === 1 ? 'Stopped: ' : 'Stopped (' + idleList.length + '): ') + idleList.join(', ')

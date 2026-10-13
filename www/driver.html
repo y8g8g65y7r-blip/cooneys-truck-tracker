@@ -168,6 +168,8 @@
     .job-card.accepted { box-shadow: 0 0 0 2px #22c55e; }
     .jc-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
     .jc-when { font-size: 12px; color: #6c757d; font-weight: 600; }
+    .jc-unit { font-size: 11.5px; font-weight: 800; color: #004AAD; background: #eaf1ff; padding: 4px 8px; border-radius: 6px; letter-spacing: 0.3px; }
+    .jc-unit.none { color: #6c757d; background: #f1f3f5; }
     .pill {
       display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 800;
       letter-spacing: 0.6px; text-transform: uppercase; padding: 4px 9px; border-radius: 20px;
@@ -1223,7 +1225,7 @@
       loadNotice()
       initStatusMirror()
       $('infoName').textContent = profile?.full_name || 'Unknown'
-      $('unitBadge').textContent = 'UNIT ' + (profile?.unit_number || '—')
+      $('unitBadge').textContent = 'UNIT …'   // set from the open job(s) once they load (0015)
       setComposeMode('message')
       const m = /^#job=([0-9a-f-]{36})$/i.exec(location.hash)
       if (m) openJob(m[1], { replace: true })
@@ -1469,10 +1471,18 @@
       return d.picked_up_at ? 'dropoff' : 'pickup'
     }
 
+    // (0015) The unit is whatever dispatch put on the driver's open job(s), never
+    // a number fixed to the person. No open job with a unit: "NO UNIT".
+    function renderUnitBadge() {
+      const units = [...new Set(activeDispatches.map(d => d.unit_number).filter(Boolean))]
+      $('unitBadge').textContent = units.length ? 'UNIT ' + units.join(' / ') : 'NO UNIT'
+    }
+
     function renderDispatches(force) {
+      renderUnitBadge()
       const list = $('dispatchList')
       const countEl = $('jobCount')
-      const sig = JSON.stringify([activeDispatches.map(d => [d.id, d.accepted_at, d.site_address, d.notes, d.lat, d.lng,
+      const sig = JSON.stringify([activeDispatches.map(d => [d.id, d.accepted_at, d.site_address, d.notes, d.lat, d.lng, d.unit_number,
         d.pickup_name, d.pickup_address, d.pickup_lat, d.pickup_lng, d.picked_up_at, d.pickup_source,
         (eventsByDispatch[d.id] || []).map(e => [e.id, e.kind, e.event_at]), isUnread(d.id)]),
         outbox ? outbox.items().map(x => [x.id, x.state]) : []])
@@ -1511,7 +1521,7 @@
         : `<button class="btn-accept" data-accept="${id}">Accept Job</button><button class="btn-details" data-open="${id}">Details</button>`
       return `
         <article class="card job-card ${accepted ? 'accepted' : 'pending'}" data-dispatch="${id}">
-          <div class="jc-top">${pill}<span class="jc-when">${activeDispatches.length > 1 ? 'Job ' + (i + 1) + ' · ' : ''}Sent ${escapeHtml(clock(new Date(d.created_at).getTime()))}</span>${unread}</div>
+          <div class="jc-top">${pill}<span class="jc-unit${d.unit_number ? '' : ' none'}">${d.unit_number ? 'Unit ' + escapeHtml(d.unit_number) : 'No unit'}</span><span class="jc-when">${activeDispatches.length > 1 ? 'Job ' + (i + 1) + ' · ' : ''}Sent ${escapeHtml(clock(new Date(d.created_at).getTime()))}</span>${unread}</div>
           ${route}
           ${d.notes ? `<div class="jc-notes">${escapeHtml(d.notes)}</div>` : ''}
           ${loads}
@@ -1618,7 +1628,7 @@
         $('btnComplete').disabled = false; $('btnComplete').textContent = 'Mark Job Complete'
       }
       $('jobTitle').textContent = DispatchStops.routeText(d) || 'Job'
-      $('jobSub').textContent = 'Sent ' + clock(new Date(d.created_at).getTime()) +
+      $('jobSub').textContent = (d.unit_number ? 'Unit ' + d.unit_number : 'No unit') + ' · Sent ' + clock(new Date(d.created_at).getTime()) +
         (idx >= 0 && activeDispatches.length > 1 ? ' · Job ' + (idx + 1) + ' of ' + activeDispatches.length : '')
       const pill = $('jobPill')
       if (!active) { pill.className = 'pill ' + (d.status === 'cancelled' ? 'cancelled' : 'done'); pill.textContent = d.status === 'cancelled' ? 'Cancelled' : 'Completed' }
@@ -2229,7 +2239,7 @@
         return `
           <div class="history-item">
             <div class="addr">${escapeHtml(DispatchStops.routeText(d))}</div>
-            <div class="meta">${statusStr} · ${timeStr}${d.picked_up_at ? ' · loaded ' + new Date(d.picked_up_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+            <div class="meta">${d.unit_number ? 'Unit ' + escapeHtml(d.unit_number) + ' · ' : ''}${statusStr} · ${timeStr}${d.picked_up_at ? ' · loaded ' + new Date(d.picked_up_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
             ${d.completion_photo_path ? `<img class="history-photo" data-photo="${escapeHtml(d.completion_photo_path)}" alt="Photo attached to this job">` : ''}
             <button class="history-open" data-open-job="${id}">Messages and details</button><button class="legs-toggle" data-legs="${id}">Show trip breakdown</button>
             <div class="legs-body" data-legs-body="${id}"></div>
@@ -2598,7 +2608,7 @@
       document.getElementById('tkJobNo').value = t.job_number || ''
       document.getElementById('tkAddress').value = t.site_address || (d ? d.site_address : '')
       document.getElementById('tkDriver').value = t.driver_name || myProfile.full_name || ''
-      document.getElementById('tkTruck').value = t.truck_number || myProfile.unit_number || ''
+      document.getElementById('tkTruck').value = t.truck_number || (d && d.unit_number) || ''
       document.getElementById('tkEquipment').value = t.equipment || ''
       document.getElementById('tkDescription').value = t.description_of_work || ''
       document.getElementById('tkAmount').value = t.total != null ? t.total : ''

@@ -208,6 +208,12 @@
       flex-shrink: 0;
     }
     .dispatch-info { flex: 1; min-width: 0; }
+    .field-hint { font-size: 11.5px; color: #6c757d; margin-top: 5px; min-height: 14px; }
+    .modal-unit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 2px; font-size: 13px; }
+    .modal-unit select { border: 1.5px solid #e2e8f0; border-radius: 8px; padding: 7px 8px; font-size: 14px; font-family: inherit; }
+    .modal-unit button { border: none; border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700; background: var(--brand-blue); color: #fff; cursor: pointer; font-family: inherit; }
+    .modal-unit button:disabled { background: #9aa0a6; }
+    .modal-unit .msg { color: #6c757d; font-size: 12px; }
     .dispatch-info .addr { font-size: 13px; font-weight: 600; color: #15161a; overflow-wrap: anywhere; }
     .dispatch-info .meta { font-size: 11px; color: #9aa0a6; }
     /* Explicit affordance for the trip breakdown. The whole row is tappable
@@ -779,6 +785,7 @@
     </div>
     <div class="header-right">
       <a href="employees.html" class="btn-nav">Employees</a>
+      <a href="units.html" class="btn-nav">Units</a>
       <a href="map.html" class="btn-nav">📍 Live Map</a>
       <button class="btn-nav" onclick="signOut()">Sign Out</button>
     </div>
@@ -790,10 +797,20 @@
       <div class="card-title">Send Dispatch</div>
 
       <div class="field">
-        <label for="driverSelect">Driver / Unit</label>
+        <label for="driverSelect">Driver</label>
         <select id="driverSelect">
           <option value="">Loading drivers...</option>
         </select>
+      </div>
+
+      <!-- 0015: the unit belongs to the JOB, not the driver. Defaults to the
+           unit this driver was last dispatched in; change it per job. -->
+      <div class="field">
+        <label for="unitSelect">Unit</label>
+        <select id="unitSelect">
+          <option value="">Loading units...</option>
+        </select>
+        <div class="field-hint" id="unitHint"></div>
       </div>
 
       <!-- Optional first stop. Closed = a single-stop dispatch, exactly as before. -->
@@ -863,6 +880,7 @@
       <button class="modal-close" onclick="closeHistoryModal()">✕</button>
       <div class="modal-title" id="modalTitle"></div>
       <div class="modal-driver" id="modalDriver"></div>
+      <div class="modal-unit" id="modalUnit"></div>
       <div class="modal-notes" id="modalNotes" style="display:none;"></div>
       <img class="modal-photo" id="modalPhoto" alt="Photo the driver attached when completing this job">
       <div id="modalTicket"></div>
@@ -977,6 +995,9 @@
     // (0013). boardSeen remembers which driver taps were already painted, so
     // only a NEW tap flashes its row.
     let eventsById = {}
+    // (0015) Active units for the pickers, and a per-driver "last unit" cache.
+    let unitsList = []
+    let unitsLoaded = false
     let boardSeen = null
 
     function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -991,7 +1012,9 @@
       // Never let a slow or failed roster query gate the dispatch list, the poll
       // or the realtime subscription — the list degrades to "Unknown driver",
       // which is far better than showing nothing at all.
-      try { await loadDrivers() } catch (e) { console.error('Driver roster failed to load', e) }
+      try { await Promise.all([loadDrivers(), loadUnits()]) } catch (e) { console.error('Driver roster / units failed to load', e) }
+      defaultUnitForDriver(document.getElementById('driverSelect').value)
+      document.getElementById('driverSelect').addEventListener('change', e => defaultUnitForDriver(e.target.value))
       loadActiveDispatches()
       setInterval(loadActiveDispatches, 20000)
       registerPush()
@@ -1130,7 +1153,8 @@
         return
       }
       const driver = driverMap[job.driver_id]
-      const unit = driver ? ('Unit ' + (driver.unit_number || '—')) : 'Driver'
+      // (0015) the unit on this job; no unit -> the driver's name
+      const unit = job.unit_number ? 'Unit ' + job.unit_number : (driver ? driver.full_name : 'Driver')
       const tm = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       // A message from ANOTHER dispatcher is not the driver: label by sender.
       const who = x => x.mine ? 'You' : (x.senderId === job.driver_id ? unit : 'Dispatch')
@@ -1190,8 +1214,8 @@
 
     function renderDriverChips() {
       const row = document.getElementById('driverFilterRow')
-      const drivers = Object.values(driverMap).sort((a, b) => (a.unit_number || '').localeCompare(b.unit_number || '', undefined, { numeric: true }))
-      const chips = [{ id: null, label: 'All Drivers' }, ...drivers.map(d => ({ id: d.id, label: 'Unit ' + (d.unit_number || '—') }))]
+      const drivers = Object.values(driverMap).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+      const chips = [{ id: null, label: 'All Drivers' }, ...drivers.map(d => ({ id: d.id, label: d.full_name || 'Driver' }))]
       row.innerHTML = chips.map(c => `
         <button class="driver-chip${historyDriverFilter === c.id ? ' active' : ''}" onclick="filterHistoryByDriver(${c.id ? `'${escapeHtml(c.id)}'` : 'null'})">${escapeHtml(c.label)}</button>
       `).join('')
@@ -1231,7 +1255,7 @@
       data.forEach(d => { historyById[d.id] = d; jobById[d.id] = d })
       itemsEl.innerHTML = data.map(d => {
         const driver = driverMap[d.driver_id]
-        const unit = driver?.unit_number || '—'
+        const unit = d.unit_number || '—'   // (0015) the unit that was on this job
         const name = driver?.full_name || 'Unknown driver'
         const timeStr = new Date(d.completed_at || d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         const id = escapeHtml(d.id)
@@ -1319,11 +1343,11 @@
       const seq = ++detailSeq
 
       const driver = driverMap[d.driver_id]
-      const unit = driver?.unit_number || '—'
       const name = driver?.full_name || 'Unknown driver'
 
       document.getElementById('modalTitle').textContent = DispatchStops.routeText(d)
-      document.getElementById('modalDriver').textContent = `Unit ${unit} — ${name}`
+      document.getElementById('modalDriver').textContent = (d.unit_number ? 'Unit ' + d.unit_number : 'No unit') + ' — ' + name
+      renderModalUnit(d)
 
       const notesEl = document.getElementById('modalNotes')
       if (d.notes) { notesEl.textContent = d.notes; notesEl.style.display = 'block' }
@@ -1844,7 +1868,7 @@
     }
 
     async function loadDrivers() {
-      const { data } = await sb.from('profiles').select('id, full_name, unit_number').eq('role', 'driver').order('unit_number')
+      const { data } = await sb.from('profiles').select('id, full_name, unit_number').eq('role', 'driver').order('full_name')
       const select = document.getElementById('driverSelect')
       if (!data || data.length === 0) {
         select.innerHTML = '<option value="">No drivers found</option>'
@@ -1852,7 +1876,71 @@
       }
       driverMap = {}
       data.forEach(d => { driverMap[d.id] = d })
-      select.innerHTML = data.map(d => `<option value="${escapeHtml(d.id)}">Unit ${escapeHtml(d.unit_number || '—')} — ${escapeHtml(d.full_name)}</option>`).join('')
+      select.innerHTML = data.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.full_name)}</option>`).join('')
+    }
+
+    // --- Units (0015) ---------------------------------------------------------------
+    const unitSort = (a, b) => String(a.unit_number).localeCompare(String(b.unit_number), undefined, { numeric: true })
+    const unitOptionLabel = u => 'Unit ' + u.unit_number + (u.make ? ' · ' + u.make : '') + (u.confirmed === false ? ' (unconfirmed)' : '')
+
+    async function loadUnits() {
+      const sel = document.getElementById('unitSelect')
+      const { data, error } = await sb.from('units').select('id, unit_number, make, year, confirmed').eq('active', true)
+      if (error) {
+        // Old database / no access: send without a unit and let the server
+        // default it, exactly as older builds do.
+        unitsLoaded = false
+        sel.innerHTML = '<option value="">Units unavailable — the job keeps the driver\'s last unit</option>'
+        return
+      }
+      unitsList = (data || []).slice().sort(unitSort)
+      unitsLoaded = true
+      sel.innerHTML = '<option value="none">No unit</option>' +
+        unitsList.map(u => `<option value="${escapeHtml(u.id)}">${escapeHtml(unitOptionLabel(u))}</option>`).join('')
+    }
+
+    // One tap in the common case: the unit this driver was last dispatched in,
+    // else the unit on their (old) profile, else "No unit". Never permanent.
+    async function defaultUnitForDriver(driverId) {
+      const sel = document.getElementById('unitSelect'), hint = document.getElementById('unitHint')
+      if (!unitsLoaded || !driverId) { hint.textContent = ''; return }
+      const name = (driverMap[driverId] || {}).full_name || 'this driver'
+      const { data } = await sb.from('dispatches').select('unit_id, unit_number')
+        .eq('driver_id', driverId).not('unit_id', 'is', null).order('created_at', { ascending: false }).limit(1)
+      if (document.getElementById('driverSelect').value !== driverId) return
+      const last = data && data[0] && unitsList.find(u => u.id === data[0].unit_id)
+      const prof = (driverMap[driverId] || {}).unit_number
+      const fromProfile = !last && prof ? unitsList.find(u => String(u.unit_number).toLowerCase() === String(prof).trim().toLowerCase()) : null
+      const pick = last || fromProfile
+      sel.value = pick ? pick.id : 'none'
+      hint.textContent = last ? 'Last unit for ' + name + '. Change it if they are in a different truck.'
+        : fromProfile ? 'From ' + name + '\'s profile. Change it if they are in a different truck.'
+        : 'No unit on record for ' + name + '. Pick one.'
+    }
+
+    // Change the unit on an open job (job detail).
+    function renderModalUnit(d) {
+      const el = document.getElementById('modalUnit')
+      if (!d || d.status !== 'active' || !unitsLoaded) { el.innerHTML = ''; return }
+      const opts = '<option value="none">No unit</option>' + unitsList.map(u =>
+        `<option value="${escapeHtml(u.id)}"${u.id === d.unit_id ? ' selected' : ''}>${escapeHtml(unitOptionLabel(u))}</option>`).join('')
+      el.innerHTML = `<label for="modalUnitSel">Unit on this job</label><select id="modalUnitSel">${opts}</select>
+        <button type="button" id="modalUnitSave" disabled>Save</button><span class="msg" id="modalUnitMsg"></span>`
+      const sel = el.querySelector('#modalUnitSel'), btn = el.querySelector('#modalUnitSave'), msg = el.querySelector('#modalUnitMsg')
+      if (!d.unit_id) sel.value = 'none'
+      sel.addEventListener('change', () => { btn.disabled = (sel.value === (d.unit_id || 'none')); msg.textContent = '' })
+      btn.addEventListener('click', async () => {
+        btn.disabled = true; msg.textContent = 'Saving...'
+        const patch = sel.value === 'none' ? { unit_id: null, unit_number: null } : { unit_id: sel.value }
+        const { data, error } = await sb.from('dispatches').update(patch).eq('id', d.id).select('unit_id, unit_number').single()
+        if (error) { msg.textContent = 'Not saved: ' + error.message; btn.disabled = false; return }
+        d.unit_id = data.unit_id; d.unit_number = data.unit_number
+        if (jobById[d.id]) { jobById[d.id].unit_id = data.unit_id; jobById[d.id].unit_number = data.unit_number }
+        msg.textContent = 'Saved'
+        document.getElementById('modalDriver').textContent = (d.unit_number ? 'Unit ' + d.unit_number : 'No unit') + ' — ' + ((driverMap[d.driver_id] || {}).full_name || 'Unknown driver')
+        lastActiveSig = ''
+        loadActiveDispatches()
+      })
     }
 
     // ---- Address lookup (Find) + pin picker ---------------------------------
@@ -2140,6 +2228,12 @@
         .map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.address)}</option>`).join('')
     }
 
+    function unitPayload() {
+      const v = document.getElementById('unitSelect').value
+      if (!unitsLoaded || !v) return {}
+      return v === 'none' ? { unit_id: null, unit_number: '' } : { unit_id: v }
+    }
+
     async function submitDispatch() {
       const driverId = document.getElementById('driverSelect').value
       const pinLabel = (lat, lng) => (lat != null && lng != null) ? 'Pin ' + Number(lat).toFixed(5) + ', ' + Number(lng).toFixed(5) : ''
@@ -2175,7 +2269,10 @@
         pickup_name: pickupAddress ? (pickupName || null) : null,
         pickup_address: pickupAddress || null,
         pickup_lat: pickupAddress ? pickupLat : null,
-        pickup_lng: pickupAddress ? pickupLng : null
+        pickup_lng: pickupAddress ? pickupLng : null,
+        // (0015) The unit on this job. Units list unavailable -> send nothing and
+        // the server defaults it (the driver's last unit), same as older builds.
+        ...unitPayload()
       }).select().single()
 
       if (error) {
@@ -2273,7 +2370,7 @@
       // an unconditional rebuild (the old behaviour) would wipe it and steal
       // focus on every 20s poll. See lastActiveSig's declaration.
       const sig = JSON.stringify(data.map(d => [d.id, d.accepted_at, d.site_address, d.notes,
-        d.pickup_name, d.pickup_address, d.picked_up_at, d.pickup_source]))
+        d.pickup_name, d.pickup_address, d.picked_up_at, d.pickup_source, d.unit_number]))
       if (sig === lastActiveSig) { data.forEach(d => { jobById[d.id] = d }); return }
       lastActiveSig = sig
 
@@ -2291,7 +2388,7 @@
       data.forEach(d => { jobById[d.id] = d })
       list.innerHTML = data.map(d => {
         const driver = driverMap[d.driver_id]
-        const unit = driver?.unit_number || '—'
+        const unit = d.unit_number || '—'   // (0015) the unit on this job
         const name = driver?.full_name || 'Unknown driver'
         const timeStr = new Date(d.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         const accepted = !!d.accepted_at

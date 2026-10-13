@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Cooney's Trucking — Units</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#15161a">
+  <link rel="stylesheet" href="theme.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f5f7; min-height: 100vh; }
+    .header {
+      background: #15161a; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 100; flex-wrap: wrap; row-gap: 10px;
+    }
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-img { height: 34px; width: auto; display: block; }
+    .header-logo { font-size: 16px; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
+    .header-right { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .btn-nav {
+      background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 6px; padding: 8px 14px;
+      font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block;
+    }
+    .main { max-width: 640px; margin: 0 auto; padding: 20px 16px 48px; }
+    .card { background: #fff; border-radius: 14px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
+    .card-title { font-size: 15px; font-weight: 800; color: #15161a; margin-bottom: 4px; }
+    .card-sub { font-size: 12.5px; color: #6c757d; margin-bottom: 16px; line-height: 1.45; }
+    .add-row { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; }
+    .add-row input {
+      border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 12px; font-size: 16px; font-family: inherit; outline: none; min-width: 0;
+    }
+    .add-row input:focus { border-color: var(--brand-blue); }
+    .btn-primary { border: none; border-radius: 10px; padding: 0 18px; background: var(--brand-blue); color: #fff; font-size: 14px; font-weight: 800; cursor: pointer; font-family: inherit; }
+    .btn-primary:disabled { background: #9aa0a6; }
+    .msg { font-size: 12.5px; margin-top: 10px; min-height: 16px; font-weight: 600; }
+    .msg.err { color: #b91c1c; }
+    .msg.ok { color: #15803d; }
+    .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .chip { border: 1.5px solid #e2e8f0; background: #fff; border-radius: 16px; padding: 7px 12px; font-size: 12.5px; font-weight: 700; color: #4b5563; cursor: pointer; font-family: inherit; }
+    .chip.on { background: #15161a; border-color: #15161a; color: #fff; }
+    .unit-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #f1f3f5; }
+    .unit-row:first-child { border-top: none; }
+    .unit-no {
+      flex-shrink: 0; min-width: 56px; text-align: center; font-size: 15px; font-weight: 900; color: #fff;
+      background: var(--brand-blue); border-radius: 8px; padding: 8px 6px;
+    }
+    .unit-row.retired .unit-no { background: #9aa0a6; }
+    .unit-info { flex: 1; min-width: 0; }
+    .unit-info .l1 { font-size: 13.5px; font-weight: 700; color: #15161a; overflow-wrap: anywhere; }
+    .unit-info .l2 { font-size: 12px; color: #6c757d; overflow-wrap: anywhere; margin-top: 2px; }
+    .tag { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; padding: 2px 7px; border-radius: 6px; margin-left: 6px; vertical-align: 1px; }
+    .tag.unconfirmed { background: #fff7ed; color: #9a3412; }
+    .tag.retired { background: #f1f3f5; color: #6c757d; }
+    .acts { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+    .acts button {
+      border: 1.5px solid #dde2e8; background: #fff; border-radius: 8px; padding: 8px 10px; font-size: 12px; font-weight: 700;
+      color: #15161a; cursor: pointer; font-family: inherit; min-height: 36px;
+    }
+    .acts button.confirm { border-color: #bbf7d0; color: #15803d; }
+    .acts button.retire { color: #b91c1c; }
+    .empty { font-size: 13px; color: #9aa0a6; text-align: center; padding: 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <img src="logo.png" alt="Cooney's" class="header-img" width="51" height="34">
+      <div class="header-logo">UNITS</div>
+    </div>
+    <div class="header-right">
+      <a href="dispatcher.html" class="btn-nav">Dispatch</a>
+      <a href="employees.html" class="btn-nav">Employees</a>
+      <a href="map.html" class="btn-nav">Live Map</a>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="card">
+      <div class="card-title">Add a unit</div>
+      <div class="card-sub">Units belong to jobs, not to drivers: dispatch picks the unit each time it sends a job. Add a truck here and it shows up in the Unit list on the dispatch screen.</div>
+      <form class="add-row" id="addForm">
+        <input id="newNumber" placeholder="Unit #" maxlength="20" autocomplete="off" aria-label="Unit number" required>
+        <input id="newMake" placeholder="Make / model (optional)" maxlength="80" autocomplete="off" aria-label="Make and model">
+        <button class="btn-primary" type="submit" id="addBtn">Add</button>
+      </form>
+      <div class="msg" id="addMsg"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Units</div>
+      <div class="card-sub">Retired units stay on the jobs they were used on. "Unconfirmed" units came from a driver's old app profile and are not on the Axon list yet; confirm them when you know they are real trucks.</div>
+      <div class="filters" id="filters">
+        <button class="chip on" data-f="active">Active</button>
+        <button class="chip" data-f="unconfirmed">Unconfirmed</button>
+        <button class="chip" data-f="retired">Retired</button>
+        <button class="chip" data-f="all">All</button>
+      </div>
+      <div id="list"><div class="empty">Loading units...</div></div>
+      <div class="msg" id="listMsg"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script>
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    let units = []
+    let filter = 'active'
+    const $ = id => document.getElementById(id)
+    function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    const byNumber = (a, b) => String(a.unit_number).localeCompare(String(b.unit_number), undefined, { numeric: true })
+
+    sb.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) { window.location.href = 'index.html'; return }
+      const { data: profile } = await sb.from('profiles').select('role').eq('id', session.user.id).single()
+      // Office staff only (no account holds the separate 'admin' role today).
+      if (profile?.role !== 'admin' && profile?.role !== 'dispatcher') { window.location.href = 'dashboard.html'; return }
+      load()
+    })
+
+    async function load() {
+      const { data, error } = await sb.from('units').select('id, unit_number, year, make, plate, active, confirmed, source, note').order('unit_number')
+      if (error) { $('list').innerHTML = '<div class="empty">Could not load units: ' + escapeHtml(error.message) + '</div>'; return }
+      units = (data || []).sort(byNumber)
+      render()
+    }
+
+    function render() {
+      const rows = units.filter(u =>
+        filter === 'all' ? true : filter === 'retired' ? !u.active : filter === 'unconfirmed' ? (u.active && !u.confirmed) : u.active)
+      if (!rows.length) { $('list').innerHTML = '<div class="empty">Nothing here.</div>'; return }
+      $('list').innerHTML = rows.map(u => {
+        const l1 = [u.year, u.make].filter(Boolean).join(' ') || (u.source === 'app' ? 'From an app driver profile' : 'No details')
+        const l2 = [u.plate ? 'Plate ' + u.plate : null, u.note].filter(Boolean).join(' · ')
+        return `<div class="unit-row${u.active ? '' : ' retired'}" data-id="${escapeHtml(u.id)}">
+          <div class="unit-no">${escapeHtml(u.unit_number)}</div>
+          <div class="unit-info">
+            <div class="l1">${escapeHtml(l1)}${!u.active ? '<span class="tag retired">Retired</span>' : (!u.confirmed ? '<span class="tag unconfirmed">Unconfirmed</span>' : '')}</div>
+            ${l2 ? `<div class="l2">${escapeHtml(l2)}</div>` : ''}
+          </div>
+          <div class="acts">
+            ${u.active && !u.confirmed ? '<button class="confirm" data-act="confirm">Confirm</button>' : ''}
+            <button data-act="note">Note</button>
+            ${u.active ? '<button class="retire" data-act="retire">Retire</button>' : '<button data-act="reactivate">Reactivate</button>'}
+          </div>
+        </div>`
+      }).join('')
+    }
+
+    $('filters').addEventListener('click', e => {
+      const b = e.target.closest('[data-f]'); if (!b) return
+      filter = b.dataset.f
+      document.querySelectorAll('#filters .chip').forEach(c => c.classList.toggle('on', c === b))
+      render()
+    })
+
+    $('list').addEventListener('click', async e => {
+      const b = e.target.closest('button[data-act]'); if (!b) return
+      const id = b.closest('[data-id]').dataset.id
+      const u = units.find(x => x.id === id); if (!u) return
+      let patch = null
+      if (b.dataset.act === 'confirm') patch = { confirmed: true }
+      else if (b.dataset.act === 'retire') {
+        if (!confirm('Retire unit ' + u.unit_number + '? It disappears from the dispatch Unit list. Jobs it was used on keep it.')) return
+        patch = { active: false }
+      } else if (b.dataset.act === 'reactivate') patch = { active: true }
+      else if (b.dataset.act === 'note') {
+        const n = prompt('Note for unit ' + u.unit_number + ' (blank to clear):', u.note || '')
+        if (n === null) return
+        patch = { note: n.trim().slice(0, 300) || null }
+      }
+      b.disabled = true
+      const { error } = await sb.from('units').update(patch).eq('id', id)
+      if (error) {
+        $('listMsg').className = 'msg err'
+        $('listMsg').textContent = /duplicate|unique/i.test(error.message)
+          ? 'Another active unit already uses number ' + u.unit_number + '. Retire that one first.'
+          : 'Not saved: ' + error.message
+        b.disabled = false
+        return
+      }
+      $('listMsg').className = 'msg ok'; $('listMsg').textContent = 'Saved.'
+      load()
+    })
+
+    $('addForm').addEventListener('submit', async e => {
+      e.preventDefault()
+      const unit_number = $('newNumber').value.trim()
+      const make = $('newMake').value.trim() || null
+      if (!unit_number) return
+      $('addBtn').disabled = true
+      const { error } = await sb.from('units').insert({ unit_number, make })
+      $('addBtn').disabled = false
+      if (error) {
+        $('addMsg').className = 'msg err'
+        $('addMsg').textContent = /duplicate|unique/i.test(error.message) ? 'Unit ' + unit_number + ' is already on the list.' : 'Not added: ' + error.message
+        return
+      }
+      $('addMsg').className = 'msg ok'; $('addMsg').textContent = 'Unit ' + unit_number + ' added.'
+      $('newNumber').value = ''; $('newMake').value = ''
+      load()
+    })
+  </script>
+</body>
+</html>

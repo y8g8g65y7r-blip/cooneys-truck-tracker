@@ -229,6 +229,7 @@
     </div>
     <div class="header-right">
       <a href="dispatcher.html" class="btn-nav">Dispatch</a>
+      <a href="units.html" class="btn-nav">Units</a>
       <a href="map.html" class="btn-nav">📍 Live Map</a>
       <button class="btn-nav" onclick="signOut()">Sign Out</button>
     </div>
@@ -258,8 +259,9 @@
       </div>
 
       <div class="field" id="unitField">
-        <label for="empUnit">Unit Number</label>
+        <label for="empUnit">Usual unit (optional)</label>
         <input type="text" id="empUnit" placeholder="e.g. 12" autocomplete="off">
+        <div style="font-size:11.5px;color:#6c757d;margin-top:5px">Dispatch now picks the unit on each job (Units page). This is only a first-job default and what older app versions show.</div>
       </div>
 
       <div class="field" id="typeField">
@@ -343,11 +345,9 @@
       const errEl = document.getElementById('addError')
       errEl.style.display = 'none'
 
-      // Unit number is required for drivers only; admins don't drive a unit.
-      if (!full_name || !email || !password || (role === 'driver' && !unit_number)) {
-        errEl.textContent = role === 'driver'
-          ? '⚠ Please fill in name, email, unit number and a temp password.'
-          : '⚠ Please fill in name, email and a temp password.'
+      // (0015) The unit belongs to each job now, so it is optional here.
+      if (!full_name || !email || !password) {
+        errEl.textContent = '⚠ Please fill in name, email and a temp password.'
         errEl.style.display = 'block'
         return
       }

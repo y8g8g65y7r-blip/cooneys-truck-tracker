@@ -138,7 +138,7 @@ Deno.serve(async (req) => {
 
     const { data: dispatch, error: dispatchErr } = await admin
       .from('dispatches')
-      .select('id, driver_id, site_address')
+      .select('*')
       .eq('id', message.dispatch_id)
       .maybeSingle()
 
@@ -159,8 +159,12 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     const senderIsDriver = user.id === dispatch.driver_id
+    // (0015) The unit is the one on THIS job (dispatches.unit_number), not a
+    // unit fixed to the driver. No unit on the job: just the driver's name.
+    // select('*') above, so this also works before 0015 is applied.
+    const jobUnit = (dispatch as Record<string, unknown>).unit_number as string | null | undefined
     const senderLabel = senderIsDriver
-      ? `Unit ${senderProfile?.unit_number || '?'} (${senderProfile?.full_name || 'Driver'})`
+      ? (jobUnit ? `Unit ${jobUnit} (${senderProfile?.full_name || 'Driver'})` : (senderProfile?.full_name || 'Driver'))
       : (senderProfile?.full_name || 'Dispatch')
     const alertTitle = `${senderLabel} — ${String(dispatch.site_address ?? 'job').split(',')[0]}`
     const alertBody = String(message.body ?? '').slice(0, MAX_ALERT_BODY)
